@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Your Balance — BankBot</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="page">
+  <header class="topbar">
+    <div>Your Balance</div>
+    <nav><a href="{{ url_for('user_dashboard') }}">← Back to Dashboard</a></nav>
+  </header>
+  <main class="container">
+    <div class="balance-card" style="max-width:480px">
+      <div class="balance-label">Total Balance</div>
+      <div class="balance-amount">₹ {{ '%.2f'|format(total) }}</div>
+    </div>
+    <p class="hint" style="margin-top:12px;">This is the sum of all your linked accounts.</p>
+  </main>
+</body>
+</html>

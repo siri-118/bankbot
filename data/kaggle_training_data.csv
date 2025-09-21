@@ -1,0 +1,47 @@
+text,intent,response
+hi,greet,👋 Hello! How can I help you today?
+hello,greet,👋 Hi there! Ask me about balance, transactions, loans, cards or transfers.
+hey,greet,👋 Hey! What can I do for you?
+bye,goodbye,👋 Goodbye! Have a great day.
+goodbye,goodbye,👋 See you next time.
+
+what is my balance,balance_check,💰 Your total balance appears on the left. I can also read it out if you want.
+check balance,balance_check,💰 Sure — showing your account balance above.
+show balance,balance_check,💰 Balance shown above. Would you like a mini statement?
+
+last transactions,last_transactions,📊 I’ve highlighted your last 5 transactions on the right.
+recent transactions,last_transactions,📊 Your recent transactions are shown. Need a full statement?
+show last 5 transactions,last_transactions,📊 Displaying your last five transactions.
+
+loan,loan_info,🏦 We offer Personal, Home, Car and Education loans. Tap **Loan** to explore options.
+loan details,loan_info,🏦 You can compare loan types and interest rates in the **Loan** section.
+apply for loan,loan_info,🏦 To apply, open **Loan** and start your application.
+
+cards,card_info,💳 Manage Debit/Credit cards in **Cards** — set limits, block card, or request a new one.
+credit card,card_info,💳 We provide multiple credit card options. Check **Cards** to proceed.
+debit card,card_info,💳 Your debit card controls are in **Cards**.
+
+transfer,transfer_help,💸 Use **Transfer** → choose payee, enter amount, confirm with OTP.
+send money,transfer_help,💸 To send money, open **Transfer** and follow the steps.
+fund transfer,transfer_help,💸 I can help with transfers. Whom would you like to send to?
+
+help,support,📞 For more help, open **Support** or chat with an agent.
+support,support,📞 Support is available in the **Support** section.
+contact support,support,📞 You can raise a ticket from **Support**.
+
+account number,account_info,🔢 For security I can’t display full numbers here — check **Profile → Accounts**.
+what is my account number,account_info,🔢 Please check **Profile → Accounts** for masked numbers.
+
+branch details,get_branch_details,📍 Open **Support** to find branch addresses and timings.
+nearest branch,get_branch_details,📍 I can help locate the nearest branch — open **Support**.
+
+create account,create_account,🧾 You can start a new account request from **Create/Upgrade Account** in **Support**.
+lost card,lost_card,🚨 Block your card immediately from **Cards → Block** and request a replacement.
+
+interest rate,get_interest_rate,📈 Current interest rates are listed in **Loan → Rates**.
+home loan interest rate,get_interest_rate,📈 Home loan rates are available in **Loan → Rates**.
+
+balance please,balance_check,💰 I’ve shown your balance above.
+mini statement,last_transactions,📊 Displaying your recent transactions.
+loan info,loan_info,🏦 Loan options are in the **Loan** section.
+card info,card_info,💳 Card options are in the **Cards** section.

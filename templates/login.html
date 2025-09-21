@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BankBot — Sign In</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    .login-shell { min-height:100vh; display:grid; place-items:center; padding:2rem; }
+    .login-card { width:min(480px, 92vw); background: var(--card); border:1px solid var(--soft); border-radius:18px; padding:1.4rem; }
+    .badge { display:inline-flex; align-items:center; gap:.4rem; font-weight:700; padding:.35rem .6rem; border-radius:999px;
+             background:#18204a; border:1px solid #2c3770; color:#d9deff; margin-bottom:.6rem; }
+    .title {
+      font-size:1.8rem; margin:.1rem 0 1rem;
+      background: linear-gradient(90deg, #8aa0ff, #5de2a5);
+      -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; color:transparent;
+    }
+    .login-card label { display:block; margin-top:.7rem; color:#b9c4ff; font-size:.9rem; }
+    .login-card input { width:100%; background:#0f1633; color:var(--text); border:1px solid var(--soft); padding:.8rem; border-radius:10px; }
+    .login-card button { margin-top:1rem; width:100%; padding:.9rem; border:none; border-radius:12px; background: linear-gradient(90deg, #5661ff, #8b5cf6); color:white; font-weight:600; cursor:pointer; }
+    .hint { color:#b9c4ff; margin-top:.6rem; font-size:.9rem; }
+    .flash p.error { background:#2e1438; padding:.5rem .75rem; border-radius:8px; }
+  </style>
+</head>
+<body>
+  <div class="login-shell">
+    <div class="login-card">
+      {% if chosen_role %}
+        <div class="badge">Signing in as <span style="text-transform:capitalize">{{ chosen_role }}</span></div>
+      {% endif %}
+      <h1 class="title">Welcome back</h1>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <div class="flash">
+            {% for cat, msg in messages %}
+              <p class="{{ cat }}">{{ msg }}</p>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+
+      <form method="post" action="{{ url_for('login_page', role=chosen_role) }}">
+        <label>Username</label>
+        <input type="text" name="username" placeholder="e.g. user01" required>
+        <label>Password</label>
+        <input type="password" name="password" placeholder="••••••••" required>
+        <button type="submit">Sign in</button>
+      </form>
+      <div class="hint">
+        Sample users — User: <code>user01 / User01@123</code>,
+        Manager: <code>manager01 / Manager@123</code>,
+        Employee: <code>employee01 / Employee@123</code>
+      </div>
+      <div class="hint" style="margin-top:.4rem;">
+        <a href="{{ url_for('role_select') }}">← Choose a different role</a>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

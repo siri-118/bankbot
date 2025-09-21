@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>User Dashboard — BankBot</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <!-- Chat + dashboard interactions -->
+  <script defer src="{{ url_for('static', filename='user-script.js') }}?v=7"></script>
+</head>
+<body class="page">
+  <!-- Top navigation -->
+  <header class="topbar">
+    <div>Hello, <strong>{{ current_user.full_name }}</strong></div>
+    <nav><a href="{{ url_for('logout_page') }}">Logout</a></nav>
+  </header>
+
+  <!-- Main content -->
+  <main class="container dashboard">
+    <!-- Balance & quick actions -->
+    <section class="summary">
+      <div class="balance-card">
+        <div class="balance-label">Total Balance</div>
+        <div class="balance-amount" id="balance-amount">₹ {{ '%.2f'|format(balance) }}</div>
+      </div>
+
+      <div class="actions">
+        <a class="pill" href="{{ url_for('loan_page') }}">Loan</a>
+        <a class="pill" href="{{ url_for('cards_page') }}">Cards</a>
+        <a class="pill" href="{{ url_for('balance_page') }}">Balance</a>
+        <a class="pill" href="{{ url_for('transfer_page') }}">Transfer</a>
+        <a class="pill" href="{{ url_for('support_page') }}">Support</a>
+      </div>
+    </section>
+
+    <!-- Recent transactions -->
+    <section class="transactions">
+      <h2>Recent Transactions</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Date &amp; Time</th>
+            <th>Description</th>
+            <th>Type</th>
+            <th class="right">Amount (₹)</th>
+          </tr>
+        </thead>
+        <tbody id="txn-body">
+          {% for t in last5 %}
+          <tr>
+            <td>{{ t.txn_time }}</td>
+            <td>{{ t.description }}</td>
+            <td>{{ t.type }}</td>
+            <td class="right">{{ '%.2f'|format(t.amount) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  </main>
+
+  <!-- Chatbot Floating Button + Panel -->
+  <button id="chat-fab" aria-label="Open chatbot">💬</button>
+
+  <div id="chat-panel" class="hidden" aria-live="polite">
+    <div class="chat-header">
+      <div>BankBot</div>
+      <button id="chat-close" type="button">✕</button>
+    </div>
+    <div id="chat-log"></div>
+    <div class="chat-input">
+      <input id="chat-text" placeholder="Type a message..." autocomplete="off" />
+      <button id="chat-send" type="button">Send</button>
+    </div>
+  </div>
+</body>
+</html>

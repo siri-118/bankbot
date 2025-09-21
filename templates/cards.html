@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cards — BankBot</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="page">
+  <header class="topbar">
+    <div>Cards</div>
+    <nav><a href="{{ url_for('user_dashboard') }}">← Back to Dashboard</a></nav>
+  </header>
+  <main class="container">
+    <h1>Card Options</h1>
+    <div class="notice">
+      Debit, Credit, and Prepaid cards; fees depend on plan. (Demo page)
+    </div>
+  </main>
+</body>
+</html>

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Choose Role — BankBot</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="page">
+  <header class="topbar">
+    <div>Select your role to continue</div>
+    <nav><a href="{{ url_for('login_page') }}">Login</a></nav>
+  </header>
+  <main class="container">
+    <h1>Continue as</h1>
+    <div class="card-grid">
+      <a class="card" href="{{ url_for('login_page', role='manager', next=url_for('manager_page')) }}">Manager</a>
+      <a class="card" href="{{ url_for('login_page', role='employee', next=url_for('employee_page')) }}">Employee</a>
+      <a class="card" href="{{ url_for('login_page', role='user', next=url_for('user_dashboard')) }}">User</a>
+    </div>
+  </main>
+</body>
+</html>

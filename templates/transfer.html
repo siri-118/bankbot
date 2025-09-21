@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>BankBot - Transfer</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; background:#f4f6f8; margin:0; padding:0; }
+    .wrap { max-width:900px; margin:28px auto; padding:18px; }
+    h2 { margin:0 0 12px 0; }
+    #chat-area { background:#fff; border-radius:10px; padding:12px; min-height:320px;
+                 box-shadow:0 6px 18px rgba(0,0,0,.06); display:flex; flex-direction:column;
+                 gap:10px; overflow:auto; }
+    .chat-bubble { padding:10px 14px; border-radius:12px; max-width:86%; line-height:1.35; word-wrap:break-word; }
+    .chat-bubble.user { align-self:flex-end; background:#dff0df; color:#023; }
+    .chat-bubble.bot { align-self:flex-start; background:#f7f9fb; color:#111; display:flex; flex-direction:column; gap:6px; align-items:flex-start; }
+    .reply-text { white-space:pre-wrap; }
+
+    /* Entity: printed on next line with distinct font + style */
+    .entity-tag {
+      margin-top: 0;
+      font-family: "Courier New", monospace;
+      font-size: 13px;
+      font-weight: bold;
+      color: #1a237e;
+      background: #e8eaf6;
+      border: 1px solid #3949ab;
+      padding: 6px 10px;
+      border-radius: 6px;
+      display: inline-block;
+    }
+
+    #input-row { display:flex; gap:8px; margin-top:12px; }
+    #message { flex:1; padding:10px 12px; border-radius:8px; border:1px solid #ddd; font-size:14px; }
+    #send { padding:10px 14px; border-radius:8px; border:none; background:#006064; color:#fff; cursor:pointer; }
+    .debug { font-size:12px;color:#666;margin-top:10px; }
+    #raw-json { margin-top:12px; font-family:monospace; font-size:12px; color:#333; background:#fff; padding:8px; border-radius:6px; border:1px solid #eee; max-height:160px; overflow:auto; white-space:pre-wrap; }
+  </style>
+</head>
+<body>
+  <div class="wrap" role="application" aria-label="BankBot transfer chat">
+    <h2>Transfer Assistant</h2>
+
+    <div id="chat-area" role="log" aria-live="polite"></div>
+
+    <div id="input-row">
+      <input id="message" placeholder="Type transfer details or ask a question..." autocomplete="off" />
+      <button id="send">Send</button>
+    </div>
+
+    <div class="debug">Raw server JSON for last response shown below.</div>
+    <div id="raw-json">(no responses yet)</div>
+  </div>
+
+  <script>
+    const chatArea = document.getElementById('chat-area');
+    const input = document.getElementById('message');
+    const sendBtn = document.getElementById('send');
+    const rawJsonDiv = document.getElementById('raw-json');
+
+    function appendUser(text) {
+      const el = document.createElement('div');
+      el.className = 'chat-bubble user';
+      el.textContent = text;
+      chatArea.appendChild(el);
+      chatArea.scrollTop = chatArea.scrollHeight;
+    }
+
+    function extractEntity(reply, data) {
+      // Prefer explicit entity field
+      if (data && data.entity && typeof data.entity === 'string' && data.entity.trim()) {
+        return data.entity.trim();
+      }
+      // Prefer intent field
+      if (data && data.intent && typeof data.intent === 'string' && data.intent.trim()) {
+        return data.intent.trim();
+      }
+      // Bracketed at end [x]
+      let m = reply.match(/\[([A-Za-z0-9_\-]+)\]\s*$/);
+      if (m) return m[1];
+      // parenthesized (x)
+      m = reply.match(/\(([A-Za-z0-9_\-]+)\)\s*$/);
+      if (m) return m[1];
+      // trailing token heuristics
+      m = reply.match(/([A-Za-z0-9_\-]{3,})[\.!?]*\s*$/);
+      if (m) {
+        const token = m[1];
+        const heur = /_|info|help|check|transactions|transfer|loan|card/i;
+        if (heur.test(token) || token.includes('_')) return token;
+      }
+      return null;
+    }
+
+    function cleanReply(reply, entity) {
+      if (!reply) return "";
+      if (!entity) return reply;
+      // remove bracket/paren/trailing token if present
+      let r = reply.replace(new RegExp('\\s*\\[' + entity + '\\]\\s*$'), '');
+      r = r.replace(new RegExp('\\s*\\(' + entity + '\\)\\s*$'), '');
+      r = r.replace(new RegExp('\\s*' + entity + '[\\.\\!\\?]*\\s*$'), '');
+      return r.trim();
+    }
+
+    function appendBot(rawReply, data) {
+      const entity = extractEntity(rawReply || '', data || {});
+      const clean = cleanReply(rawReply || '', entity);
+
+      const el = document.createElement('div');
+      el.className = 'chat-bubble bot';
+
+      const r = document.createElement('div');
+      r.className = 'reply-text';
+      r.textContent = clean || '';
+      el.appendChild(r);
+
+      if (entity) {
+        const ent = document.createElement('div');
+        ent.className = 'entity-tag';
+        ent.textContent = `Entity: [${entity}]`;
+        el.appendChild(ent);
+      }
+
+      chatArea.appendChild(el);
+      try { rawJsonDiv.textContent = JSON.stringify(data || {}, null, 2); } catch(e) {}
+      chatArea.scrollTop = chatArea.scrollHeight;
+    }
+
+    async function sendMessage(){
+      const text = input.value.trim();
+      if (!text) return;
+      appendUser(text);
+      input.value = '';
+      input.disabled = true; sendBtn.disabled = true;
+      try {
+        const res = await fetch('/chat', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          credentials: 'same-origin',
+          body: JSON.stringify({message: text})
+        });
+        let data;
+        try {
+          data = await res.json();
+        } catch(e) {
+          const txt = await res.text();
+          data = { reply: txt || '' };
+        }
+        appendBot(data.reply || '', data || {});
+      } catch(err) {
+        console.error(err);
+        appendBot('Error contacting server.', {});
+      } finally {
+        input.disabled = false; sendBtn.disabled = false; input.focus();
+      }
+    }
+
+    sendBtn.addEventListener('click', sendMessage);
+    input.addEventListener('keydown', (e)=>{ if (e.key === 'Enter') sendMessage(); });
+    input.focus();
+  </script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Employee — BankBot</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="page">
+  <header class="topbar">
+    <div>Employee: <strong>{{ current_user.full_name }}</strong></div>
+    <nav><a href="{{ url_for('role_select') }}">Back</a> | <a href="{{ url_for('logout_page') }}">Logout</a></nav>
+  </header>
+  <main class="container">
+    <h1>Employee Workspace</h1>
+    <p>Placeholder employee features (KYC, service tickets, etc.).</p>
+    <div class="notice">Chatbot is only available to customer users.</div>
+  </main>
+</body>
+</html>
+

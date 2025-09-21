@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Loans — BankBot</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="page">
+  <header class="topbar">
+    <div>Loans</div>
+    <nav><a href="{{ url_for('user_dashboard') }}">← Back to Dashboard</a></nav>
+  </header>
+  <main class="container">
+    <h1>Apply for a Loan</h1>
+    <div class="notice">
+      Choose from Personal, Home, Car, or Education loans. (Demo page)
+    </div>
+    <p>For the demo, this page is informational. You can wire this to a form/DB later.</p>
+  </main>
+</body>
+</html>

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Select Role — BankBot</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    .role-wrap {
+      min-height: 100vh; display:flex; flex-direction:column; justify-content:center; align-items:center;
+      background: linear-gradient(135deg,#0f1633,#1a2147);
+      padding: 2rem 1rem;
+    }
+    .role-title {
+      font-size: 2.2rem; margin-bottom: 1rem;
+      background: linear-gradient(90deg, #8aa0ff, #5de2a5);
+      -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; color:transparent;
+    }
+    .role-grid {
+      display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;
+      width: min(900px, 92vw);
+    }
+    .role-card {
+      background:#151b34; border:1px solid #2c3770; border-radius:14px; padding:1.1rem 1.2rem;
+      color:#d9deff; text-decoration:none; font-weight:700; font-size:1.05rem; text-align:center;
+      transition: transform .2s, background .2s, border-color .2s;
+    }
+    .role-card:hover { background:#222a50; transform: translateY(-2px); border-color:#8aa0ff; }
+    .hint { color:#b9c4ff; margin-top:1rem; }
+  </style>
+</head>
+<body>
+  <div class="role-wrap">
+    <div class="role-title">Continue as</div>
+    <div class="role-grid">
+      <a class="role-card" href="{{ url_for('login_page', role='manager') }}">👨‍💼 Manager</a>
+      <a class="role-card" href="{{ url_for('login_page', role='employee') }}">👩‍💻 Employee</a>
+      <a class="role-card" href="{{ url_for('login_page', role='user') }}">🧑‍💳 User</a>
+    </div>
+    <div class="hint">Pick your role to sign in.</div>
+  </div>
+</body>
+</html>
