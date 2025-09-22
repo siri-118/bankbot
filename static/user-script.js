@@ -1,4 +1,4 @@
-// BankBot chat widget (v7) — guaranteed send + reply, with typing bubble and UX polish
+// static/user-script.js (patched for reply_html + entity display)
 (function () {
   function ready(fn) {
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", fn);
@@ -6,7 +6,6 @@
   }
 
   ready(() => {
-    // Grab elements
     const fab     = document.getElementById("chat-fab");
     const panel   = document.getElementById("chat-panel");
     const closeBt = document.getElementById("chat-close");
@@ -14,21 +13,28 @@
     const input   = document.getElementById("chat-text");
     const log     = document.getElementById("chat-log");
 
-    // Hard checks + console hints
     if (!fab || !panel || !sendBt || !input || !log) {
-      console.error("[Chat] Missing elements", { fab:!!fab, panel:!!panel, sendBt:!!sendBt, input:!!input, log:!!log });
+      console.error("[Chat] Missing elements", { fab, panel, sendBt, input, log });
       return;
     }
 
-    // Utils
+    // Add message to chat log
     const addMsg = (text, who = "bot") => {
       const div = document.createElement("div");
       div.className = "msg " + (who === "me" ? "me" : "bot");
-      div.textContent = text || "…";
+
+      if (who === "me") {
+        div.textContent = text || "…"; // safe plain text for user
+      } else {
+        div.innerHTML = text || "…";   // bot can use HTML (entity styled)
+      }
+
       log.appendChild(div);
       log.scrollTop = log.scrollHeight;
       return div;
     };
+
+    // Show typing bubble
     const showTyping = () => {
       const t = document.createElement("div");
       t.className = "msg bot typing";
@@ -38,7 +44,7 @@
       return t;
     };
 
-    // Open/close
+    // Open/close panel
     const openPanel = () => {
       panel.classList.remove("hidden");
       if (!log.dataset.greeted) {
@@ -52,9 +58,9 @@
     fab.addEventListener("click", openPanel);
     if (closeBt) closeBt.addEventListener("click", closePanel);
 
-    // SEND
+    // SEND function
     async function sendMsg(e) {
-      if (e) e.preventDefault(); // protect against form submits
+      if (e) e.preventDefault();
       const text = (input.value || "").trim();
       if (!text) return;
 
@@ -72,18 +78,19 @@
         });
 
         const ct = res.headers.get("content-type") || "";
+        typing.remove();
+
         if (!ct.includes("application/json")) {
-          typing.remove();
           addMsg("⚠️ Session expired or server error. Please sign in again.", "bot");
           console.warn("[Chat] Non-JSON response", res.status);
           return;
         }
 
         const data = await res.json();
-        typing.remove();
-        addMsg(data.reply, "bot");
+        const botHtml = data.reply_html || data.reply || "";
+        addMsg(botHtml, "bot");
 
-        // Optional UI cues from backend
+        // Optional cues
         if (data.action === "show_balance") {
           const el = document.getElementById("balance-amount");
           if (el) { el.classList.add("pulse"); setTimeout(()=>el.classList.remove("pulse"), 400); }
@@ -98,7 +105,7 @@
       }
     }
 
-    // Bind send button and keys
+    // Bind send button and Enter key
     sendBt.addEventListener("click", sendMsg);
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) sendMsg(e);
@@ -114,4 +121,3 @@
     console.log("[Chat] initialized ✅");
   });
 })();
-

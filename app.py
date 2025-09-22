@@ -1,123 +1,159 @@
-# app.py  (Flask) — full, self-contained server that serves templates + /chat API
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session, flash
+# app.py
+from flask import (
+    Flask, render_template, request, redirect, url_for,
+    session, jsonify, flash
+)
 from pathlib import Path
-import json, re, random, os, pickle
-from functools import wraps
+import os, re, random
 
-# local imports if present
-try:
-    from db import init_db, verify_user, get_last_transactions, get_balance
-except Exception:
-    # simple stubs if db.py is missing (keeps app runnable)
-    def init_db(seed=False): return None
-    def verify_user(u,p):
-        if (u,p) == ("user01","User01@123"):
-            return {"id":1,"username":"user01","full_name":"Demo User","role":"user"}
-        if (u,p) == ("manager01","Manager@123"):
-            return {"id":2,"username":"manager01","full_name":"Manager","role":"manager"}
-        return None
-    def get_last_transactions(user_id, limit=5):
-        return [{"date":"2025-09-01","desc":"Grocery","amount":"-₹ 500.00"}]
-    def get_balance(user_id): return 10411.00
+# Local modules that must exist in your project (leave as-is)
+from db import init_db, verify_user, get_last_transactions, get_balance
+from nlu_runtime import TinyNLU
 
-# attempt to import a proper nlu_runtime if available
-try:
-    from nlu_runtime import TinyNLU
-    nlu = TinyNLU()
-except Exception:
-    # fallback tiny NLU
-    class TinyNLU:
-        def __init__(self): self.responses = {}
-        def parse(self, text):
-            t=text.lower()
-            if any(x in t for x in ("hi","hello","hey")): return "greet"
-            if "balance" in t or "how much" in t: return "balance_check"
-            if "transfer" in t or "send" in t: return "transfer_help"
-            if "loan" in t: return "loan"
-            if "card" in t: return "card_info"
-            return "fallback"
-        def respond(self, intent):
-            defaults = {
-                "greet":"👋 Hello! Ask me about balance, last transactions, loans, cards or transfers.",
-                "balance_check":"💰 Your balance is shown above.",
-                "transfer_help":"💸 To transfer, go to Transfer page.",
-                "loan":"🏦 We offer Personal, Home, Car and Education loans.",
-                "card_info":"💳 Debit/Credit/Prepaid cards supported.",
-                "fallback":"I didn’t quite get that, but I’m here to help."
-            }
-            return defaults.get(intent, defaults["fallback"])
-    nlu = TinyNLU()
-
-# Flask app
+# ---------------- App config ----------------
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret")
-app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=False,  # set True when behind HTTPS
+)
 
-# init DB
+# ---------------- Bootstrap DB & NLU ----------------
 init_db(seed=True)
 
-# simple login_required decorator
-def login_required(fn):
-    @wraps(fn)
-    def wrapper(*a, **kw):
-        if not session.get("user"):
-            return redirect(url_for("login_page"))
-        return fn(*a, **kw)
-    return wrapper
-
-# ---------- Helpers ----------
-def fmt_rupees(amount):
+MODEL_PATH = Path(__file__).resolve().parent / "models" / "nlu.pkl"
+if not MODEL_PATH.exists():
     try:
-        return f"₹ {float(amount):,.2f}"
-    except Exception:
-        return str(amount)
+        from nlu_train import train_and_save
+        train_and_save()
+    except Exception as e:
+        print("[WARN] NLU model missing / auto-train failed:", e)
 
-def parse_transfer(text):
-    m = re.search(r'(?i)\b(?:transfer|send)\s+(\d+(?:\.\d{1,2})?)\s*(?:₹|rs\.?|rupees)?\s*(?:to|for)\s+([A-Za-z0-9_]+)\b', text)
-    if not m:
-        return None, None
-    return float(m.group(1)), m.group(2)
+try:
+    nlu = TinyNLU(MODEL_PATH)
+except Exception as e:
+    print("[WARN] Could not initialize NLU:", e)
+    nlu = None
 
-# ---------- Routes ----------
+# ---------------- Context processor ----------------
 @app.context_processor
 def inject_user():
-    # makes current_user available in Jinja templates (fixes current_user undefined)
+    # Makes 'current_user' available inside Jinja templates
     return {"current_user": session.get("user")}
 
-@app.route("/")
-def index(): return redirect(url_for("role_select"))
+# ---------------- Helpers -------------------------
+def fmt_rupees(amount: float) -> str:
+    return f"₹ {amount:,.2f}"
 
-@app.route("/role-select")
+def parse_transfer(text: str):
+    """
+    Simple parser for: 'transfer 200 to user02' or 'send 99.5 to alice'
+    """
+    m = re.search(
+        r'(?i)\b(?:transfer|send)\s+(\d+(?:\.\d{1,2})?)\s*(?:₹|rs\.?|rupees)?\s*(?:to|for)\s+([A-Za-z0-9_]+)\b',
+        text
+    )
+    if not m:
+        return None, None
+    try:
+        return float(m.group(1)), m.group(2)
+    except:
+        return None, None
+
+def reply_from_csv_or_default(keys, default_text):
+    """
+    Try to pick a response from the NLU responses map (if present).
+    `nlu.responses` is expected to be a dict of lists.
+    """
+    try:
+        resp_map = getattr(nlu, "responses", {}) or {}
+        for k in keys:
+            v = resp_map.get(k)
+            if v:
+                return random.choice(v)
+    except Exception:
+        pass
+    return default_text
+
+# ---------------- Dialog helpers ------------------
+def start_dialog(intent, slots=None):
+    session["dialog"] = {"intent": intent, "slots": slots or {}, "fallbacks": 0}
+
+def end_dialog(success=True):
+    session.pop("dialog", None)
+
+# ---------------- Decorators ----------------------
+def login_required(fn):
+    from functools import wraps
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not session.get("user"):
+            return redirect(url_for("login_page"))
+        return fn(*args, **kwargs)
+    return wrapper
+
+# ---------------- Routes: Auth & Pages -------------
+@app.route("/", methods=["GET"])
+def index():
+    return redirect(url_for("role_select"))
+
+@app.route("/role-select", methods=["GET"])
 def role_select():
     return render_template("role_select.html")
 
-@app.route("/login", methods=["GET","POST"])
+@app.route("/login", methods=["GET", "POST"])
 def login_page():
-    chosen = (request.args.get("role") or "").strip()
+    chosen_role = (request.args.get("role") or "").strip().lower()
     if request.method == "POST":
         username = (request.form.get("username") or "").strip()
         password = (request.form.get("password") or "").strip()
         user = verify_user(username, password)
         if not user:
             flash("Invalid credentials", "error")
-            return render_template("login.html", chosen_role=chosen)
-        session["user"] = {"id": user["id"], "username": user["username"], "full_name": user.get("full_name", user["username"]), "role": user["role"]}
-        # redirect based on role
-        if user["role"] == "manager": return redirect(url_for("manager_page"))
-        if user["role"] == "employee": return redirect(url_for("employee_page"))
+            return render_template("login.html", chosen_role=chosen_role)
+
+        session["user"] = {
+            "id": user["id"],
+            "username": user["username"],
+            "full_name": user.get("full_name", user["username"]),
+            "role": user["role"],
+        }
+
+        if user["role"] == "manager":
+            return redirect(url_for("manager_page"))
+        if user["role"] == "employee":
+            return redirect(url_for("employee_page"))
         return redirect(url_for("user_dashboard"))
-    return render_template("login.html", chosen_role=chosen)
+    return render_template("login.html", chosen_role=chosen_role)
 
 @app.route("/logout")
 def logout_page():
     session.clear()
     return redirect(url_for("role_select"))
 
+# ---------------- Portal pages --------------------
+@app.route("/manager")
+@login_required
+def manager_page():
+    if session.get("user", {}).get("role") != "manager":
+        flash("Access denied: managers only.", "error")
+        return redirect(url_for("role_select"))
+    return render_template("manager.html")
+
+@app.route("/employee")
+@login_required
+def employee_page():
+    if session.get("user", {}).get("role") != "employee":
+        flash("Access denied: employees only.", "error")
+        return redirect(url_for("role_select"))
+    return render_template("employee.html")
+
 @app.route("/user-dashboard")
 @login_required
 def user_dashboard():
-    if session["user"]["role"] != "user":
-        flash("Access denied", "error")
+    if session.get("user", {}).get("role") != "user":
+        flash("Access denied: users only.", "error")
         return redirect(url_for("role_select"))
     last5 = get_last_transactions(session["user"]["id"], limit=5)
     balance = get_balance(session["user"]["id"])
@@ -126,8 +162,8 @@ def user_dashboard():
 @app.route("/balance")
 @login_required
 def balance_page():
-    if session["user"]["role"] != "user":
-        flash("Access denied", "error")
+    if session.get("user", {}).get("role") != "user":
+        flash("Access denied: users only.", "error")
         return redirect(url_for("role_select"))
     total = get_balance(session["user"]["id"])
     return render_template("balance.html", total=total)
@@ -135,86 +171,199 @@ def balance_page():
 @app.route("/loan")
 @login_required
 def loan_page():
-    if session["user"]["role"] != "user":
-        flash("Access denied", "error")
+    if session.get("user", {}).get("role") != "user":
+        flash("Access denied: users only.", "error")
         return redirect(url_for("role_select"))
     return render_template("loan.html")
 
 @app.route("/cards")
 @login_required
 def cards_page():
-    if session["user"]["role"] != "user":
-        flash("Access denied", "error")
+    if session.get("user", {}).get("role") != "user":
+        flash("Access denied: users only.", "error")
         return redirect(url_for("role_select"))
     return render_template("cards.html")
 
 @app.route("/transfer")
 @login_required
 def transfer_page():
-    if session["user"]["role"] != "user":
-        flash("Access denied", "error")
+    if session.get("user", {}).get("role") != "user":
+        flash("Access denied: users only.", "error")
         return redirect(url_for("role_select"))
     return render_template("transfer.html")
 
 @app.route("/support")
 @login_required
 def support_page():
-    if session["user"]["role"] != "user":
-        flash("Access denied", "error")
+    if session.get("user", {}).get("role") != "user":
+        flash("Access denied: users only.", "error")
         return redirect(url_for("role_select"))
     return render_template("support.html")
 
+# ---------------- Chatbot API ----------------------
+def make_reply_html(message_text: str, entity_name: str | None) -> str:
+    """
+    Build an HTML version of the reply where the entity is rendered on the next line
+    inside a span with class 'entity-tag' so you can style it via CSS.
+    """
+    safe_msg = message_text or ""
+    if entity_name:
+        ent_html = f"<div class='entity-line'>Entity: <span class='entity-tag'>{entity_name}</span></div>"
+        return f"{safe_msg}<br/>{ent_html}"
+    return safe_msg
 
-# ---------- Chat API ----------
 @app.route("/chat", methods=["POST"])
+@login_required
 def chat():
-    """
-    Accepts JSON: { message: "text" }
-    Returns JSON: { reply: "...", intent: "...", entity: "...", action: "show_balance" }
-    """
-    # if user not logged-in, return a helpful message or allow an anon API endpoint if you want
-    user = session.get("user")
+    if session.get("user", {}).get("role") != "user":
+        return jsonify({"reply": "Chatbot available only to customers.", "intent": "fallback"}), 403
+
     payload = request.get_json(silent=True) or {}
     msg = (payload.get("message") or "").strip()
     if not msg:
-        return jsonify({"reply":"Please type a message.", "intent":"fallback", "entity":""}), 200
+        return jsonify({"reply": "Please type a message.", "intent": "fallback"}), 200
 
-    # free-form transfer regex handling
+    text = msg.lower()
+
+    # 0) Continue dialog if active
+    dialog = session.get("dialog")
+    if dialog:
+        intent = dialog.get("intent")
+        slots = dialog.get("slots", {})
+        if intent == "balance_check":
+            maybe = re.search(r'(\d{4,})', text)
+            if maybe:
+                acct = maybe.group(1)
+                slots["account_number"] = acct
+                session["dialog"]["slots"] = slots
+                total = get_balance(session["user"]["id"])
+                end_dialog(success=True)
+
+                plain = f"💰 Balance for account {acct} is {fmt_rupees(total)}."
+                # Build HTML with Entity line
+                html = make_reply_html(plain, "balance_check")
+                return jsonify({
+                    "reply": plain,
+                    "reply_html": html,
+                    "intent": "balance_check",
+                    "entity": "balance_check",
+                    "action": "show_balance"
+                }), 200
+            else:
+                dialog["fallbacks"] = dialog.get("fallbacks", 0) + 1
+                session["dialog"] = dialog
+                if dialog["fallbacks"] >= 3:
+                    end_dialog(success=False)
+                    return jsonify({"reply": "I couldn't read the account number. Please try later.", "intent": "fallback", "entity": None}), 200
+                plain = "Please provide your account number (digits only)."
+                html = make_reply_html(plain, "balance_check")
+                return jsonify({"reply": plain, "reply_html": html, "intent": "ask_account_number", "entity": "balance_check"}), 200
+
+    # 1) Quick replies for common phrases
+    if re.search(r"\bloan(s)?\b", text) or "emi" in text or "interest" in text:
+        rep = reply_from_csv_or_default(["loan", "loan_info"], "🏦 Available loan types: Personal Loan, Home Loan, Car Loan, and Education Loan.")
+        plain = rep
+        html = make_reply_html(plain, "loan_info")
+        return jsonify({"reply": plain, "reply_html": html, "intent": "loan_info", "entity": "loan_info"}), 200
+
+    if re.search(r"\b(card|cards|credit|debit)\b", text):
+        rep = reply_from_csv_or_default(["card_info", "cards"], "💳 Which card would you like details for? Credit Card, Debit Card, or Prepaid Card?")
+        plain = rep
+        html = make_reply_html(plain, "card_info")
+        return jsonify({"reply": plain, "reply_html": html, "intent": "card_info", "entity": "card_info"}), 200
+
     amount, recipient = parse_transfer(msg)
     if amount is not None and recipient:
-        # example: do not actually debit anything — just a demo reply
-        reply = f"✅ Transfer {fmt_rupees(amount)} to {recipient}. You'll get an OTP to confirm."
-        return jsonify({"reply": reply, "intent": "transfer_help", "entity":"transfer_help"}), 200
+        plain = f"✅ Transfer initiated: {fmt_rupees(amount)} to {recipient}. You'll get an OTP to confirm."
+        html = make_reply_html(plain, "transfer_help")
+        return jsonify({
+            "reply": plain,
+            "reply_html": html,
+            "intent": "transfer_help",
+            "entity": "transfer_help"
+        }), 200
 
-    # simple rule-based dialog for balance that asks for account number
-    low = msg.lower()
-    # if user provided account number in a previous message? keep a dialog state in session
-    dialog = session.get("dialog") or {}
-    if dialog.get("intent") == "balance_check":
-        maybe = re.search(r'(\d{4,})', msg)
-        if maybe:
-            acct = maybe.group(1)
-            total = get_balance(user["id"]) if user else 0.0
-            session.pop("dialog", None)
-            return jsonify({"reply": f"💰 Balance for account {acct} is {fmt_rupees(total)}.", "intent":"balance_check", "entity":"balance_check", "action":"show_balance"}), 200
-        else:
-            # ask again
-            return jsonify({"reply":"Please provide your account number (digits only).", "intent":"ask_account_number", "entity":"balance_check"}), 200
+    if any(w in text for w in ("hi", "hello", "hey")):
+        rep = reply_from_csv_or_default(["greet"], "👋 Hello! Ask me about balance, last transactions, loans, cards or transfers.")
+        plain = rep
+        html = make_reply_html(plain, "greet")
+        return jsonify({"reply": plain, "reply_html": html, "intent": "greet", "entity": "greet"}), 200
 
-    # if message asks balance, start dialog
-    if "balance" in low or "account balance" in low or "how much" in low:
-        session["dialog"] = {"intent": "balance_check"}
-        return jsonify({"reply":"Sure — please provide your account number (digits only).", "intent":"balance_check", "entity":"balance_check"}), 200
+    # 2) Start balance dialog
+    if "balance" in text or "account balance" in text or "how much" in text:
+        start_dialog("balance_check")
+        plain = "Sure — please provide your account number (digits only)."
+        html = make_reply_html(plain, "balance_check")
+        return jsonify({"reply": plain, "reply_html": html, "intent": "balance_check", "entity": "balance_check"}), 200
 
-    # simple intents: loan, card, last_transactions
-    if re.search(r"\bloan(s)?\b|\bemi\b|\binterest\b", low):
-        resp = nlu.respond("loan")
-        return jsonify({"reply": resp, "intent":"loan", "entity":"loan"}), 200
+    # 3) Use NLU for other inputs (if available)
+    if nlu:
+        try:
+            predicted = nlu.parse(msg)
+            # allow nlu.parse to return an entity or an intent string depending on implementation
+            # assume parse returns an intent string name
+            if predicted == "last_transactions":
+                txns = get_last_transactions(session["user"]["id"], limit=5)
+                plain = "📊 Here are your last transactions."
+                html = make_reply_html(plain, "last_transactions")
+                return jsonify({"reply": plain, "reply_html": html, "transactions": txns, "intent": "last_transactions", "entity": "last_transactions", "action": "show_last_txns"}), 200
 
-    if re.search(r"\b(card|cards|credit|debit)\b", low):
-        resp = nlu.respond("card_info")
-        return jsonify({"reply": resp, "intent":"card_info", "entity":"card_info"}), 200
+            csv_reply = reply_from_csv_or_default([predicted], None)
+            if csv_reply:
+                plain = csv_reply
+                html = make_reply_html(plain, predicted)
+                return jsonify({"reply": plain, "reply_html": html, "intent": predicted, "entity": predicted}), 200
+        except Exception as e:
+            # don't crash - fallback below
+            print("[NLU ERROR]", e)
 
-    if re.search(r"\blast\b.*\btxn|transactions|recent\b", low) or "last transactions" in low:
-        txns = get_last_transactions(user["id"]) if user else []
-        return jsonify
+    # 4) Fallback
+    plain = "I didn’t quite get that, but I’m here to help."
+    html = make_reply_html(plain, "fallback")
+    return jsonify({"reply": plain, "reply_html": html, "intent": "fallback", "entity": "fallback"}), 200
+
+# Anonymous chat endpoint (for testing w/o login)
+@app.route("/chat_anon", methods=["POST"])
+def chat_anon():
+    payload = request.get_json(silent=True) or {}
+    msg = (payload.get("message") or "").strip()
+    if not msg:
+        return jsonify({"reply": "Please type a message.", "intent": "fallback"}), 200
+    # reuse the same logic but without login/session specifics (simple)
+    # For brevity call the /chat handler logic by simulating minimal session
+    # We'll implement a lightweight local handling here:
+    text = msg.lower()
+    if any(w in text for w in ("hi", "hello", "hey")):
+        plain = "👋 Hello! Ask me about balance, last transactions, loans, cards or transfers."
+        html = make_reply_html(plain, "greet")
+        return jsonify({"reply": plain, "reply_html": html, "intent": "greet", "entity": "greet"}), 200
+
+    amount, recipient = parse_transfer(msg)
+    if amount is not None and recipient:
+        plain = f"✅ Transfer {fmt_rupees(amount)} to {recipient}. You'll get an OTP to confirm."
+        html = make_reply_html(plain, "transfer_help")
+        return jsonify({"reply": plain, "reply_html": html, "intent": "transfer_help", "entity": "transfer_help"}), 200
+
+    if "balance" in text:
+        plain = "Sure — please provide your account number (digits only)."
+        html = make_reply_html(plain, "balance_check")
+        return jsonify({"reply": plain, "reply_html": html, "intent": "balance_check", "entity": "balance_check"}), 200
+
+    if nlu:
+        try:
+            predicted = nlu.parse(msg)
+            csv_reply = reply_from_csv_or_default([predicted], None)
+            if csv_reply:
+                plain = csv_reply
+                html = make_reply_html(plain, predicted)
+                return jsonify({"reply": plain, "reply_html": html, "intent": predicted, "entity": predicted}), 200
+        except Exception:
+            pass
+
+    plain = "I didn’t quite get that, but I’m here to help."
+    html = make_reply_html(plain, "fallback")
+    return jsonify({"reply": plain, "reply_html": html, "intent": "fallback", "entity": "fallback"}), 200
+
+# ---------------- Main -----------------------------
+if __name__ == "__main__":
+    app.run(debug=True)
