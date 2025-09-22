@@ -1,4 +1,4 @@
-# app.py
+# app.py (full file) — drop-in replacement
 from flask import (
     Flask, render_template, request, redirect, url_for,
     session, jsonify, flash
@@ -7,7 +7,7 @@ from pathlib import Path
 import os, re, random
 
 # Local modules (must exist in your repo)
-from db import init_db, verify_user, get_last_transactions, get_balance
+from db import init_db, verify_user, get_last_transactions, get_balance, block_card_for_user
 from nlu_runtime import TinyNLU
 
 # ---------------- App config ----------------
@@ -62,10 +62,6 @@ def parse_transfer(text: str):
         return None, None
 
 def reply_from_csv_or_default(keys, default_text):
-    """
-    Utility: attempt to get canned reply from NLU / response map (if available)
-    Fallback to default_text if nothing found.
-    """
     try:
         resp_map = getattr(nlu, "responses", {}) or {}
         for k in keys:
@@ -75,6 +71,15 @@ def reply_from_csv_or_default(keys, default_text):
     except Exception:
         pass
     return default_text
+
+def format_entity_html(entity_name: str) -> str:
+    """
+    HTML fragment that renders the entity in the next line with your .entity-tag CSS.
+    Example output:
+      <div class="entity-tag">Entity : [transfer_help]</div>
+    """
+    safe_name = (entity_name or "").strip()
+    return f'<div class="entity-tag">Entity : [{safe_name}]</div>'
 
 def login_required(fn):
     from functools import wraps
@@ -203,7 +208,6 @@ def support_page():
 @app.route("/chat", methods=["POST"])
 @login_required
 def chat():
-    # Chat only available for logged-in users with role 'user'
     if session.get("user", {}).get("role") != "user":
         return jsonify({"reply": "Chatbot available only to customers."}), 403
 
@@ -212,167 +216,167 @@ def chat():
     if not msg:
         return jsonify({"reply": "Please type a message.", "intent": "fallback"}), 200
 
-    text = msg.lower()
+    text = msg.strip()
+    lower = text.lower()
 
-    # 0) Continue dialog if active
+    # 0) Continue dialog if active (special case: only handle specific dialog)
     dialog = session.get("dialog")
     if dialog:
         intent = dialog.get("intent")
         slots = dialog.get("slots", {})
 
-        # Balance followup (ask for account number)
+        # Balance dialog: expect account number
         if intent == "balance_check":
-            maybe = re.search(r'(\d{4,})', text)
+            maybe = re.search(r'(\d{4,})', lower)
             if maybe:
                 acct = maybe.group(1)
                 slots["account_number"] = acct
                 session["dialog"]["slots"] = slots
                 total = get_balance(session["user"]["id"])
                 end_dialog(success=True)
-                reply_html = (
-                    f"💰 Balance for account {acct} is {fmt_rupees(total)}."
-                    f"<div class='entity-tag'>Entity: [balance_check]</div>"
-                )
-                return jsonify({
-                    "reply": f"💰 Balance for account {acct} is {fmt_rupees(total)}. balance_check",
-                    "reply_html": reply_html,
-                    "intent": "balance_check",
-                    "action": "show_balance"
-                }), 200
+                reply_text = f"💰 Balance for account {acct} is {fmt_rupees(total)}."
+                reply_html = reply_text + "\n" + format_entity_html("balance_check")
+                return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "balance_check", "entity": "balance_check", "action": "show_balance"}), 200
             else:
                 dialog["fallbacks"] = dialog.get("fallbacks", 0) + 1
                 session["dialog"] = dialog
                 if dialog["fallbacks"] >= 3:
                     end_dialog(success=False)
                     return jsonify({"reply": "I couldn't read the account number. Please try later.", "intent": "fallback"}), 200
-                return jsonify({"reply": "Please provide your account number (digits only). balance_check", "intent": "ask_account_number"}), 200
+                reply_text = "Please provide your account number (digits only)."
+                reply_html = reply_text + "\n" + format_entity_html("balance_check")
+                return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "ask_account_number"}), 200
 
-        # Card followup: detect type and respond with subtype info
-        if intent == "card_info":
-            if any(w in text for w in ("credit", "credit card", "cc")):
-                slots["card_type"] = "credit"
-            elif any(w in text for w in ("debit", "debit card")):
-                slots["card_type"] = "debit"
-            elif any(w in text for w in ("prepaid", "pre-paid", "prepaid card")):
-                slots["card_type"] = "prepaid"
-
-            if slots.get("card_type"):
-                ctype = slots["card_type"]
+        # Card dialog: expecting card type or action
+        if intent == "card_flow":
+            # user selected card type: credit/debit/prepaid OR asked to block card
+            if re.search(r"\b(credit|debit|prepaid|pre-paid|pre paid)\b", lower):
+                card_type = re.search(r"\b(credit|debit|prepaid|pre-paid|pre paid)\b", lower).group(1)
+                card_type_clean = card_type.replace("-", "_").replace(" ", "_")
+                # keep slot
+                slots["card_type"] = card_type_clean
                 session["dialog"]["slots"] = slots
-                end_dialog(success=True)
 
-                if ctype == "credit":
-                    text_reply = "💳 Credit Card — features: High credit limit, EMI options, rewards on spend."
-                elif ctype == "debit":
-                    text_reply = "💳 Debit Card — features: Direct account spends, ATM withdrawals, POS payments."
+                reply_text = f"📋 Details for {card_type_clean.title()} Card. What would you like to do? (info / block)"
+                reply_html = reply_text + "\n" + format_entity_html("card_info")
+                return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "card_info", "entity": "card_info"}), 200
+
+            # block card request within dialog
+            if re.search(r"\b(block|disable|freeze)\b", lower):
+                card_type = slots.get("card_type", "your card")
+                # call a db helper to block card (you need to implement)
+                try:
+                    blocked = block_card_for_user(session["user"]["id"], card_type)
+                    success = bool(blocked)
+                except Exception:
+                    success = False
+                if success:
+                    end_dialog(success=True)
+                    reply_text = f"✅ {card_type.title()} blocked successfully."
+                    reply_html = reply_text + "\n" + format_entity_html("block_card")
+                    return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "block_card", "entity": "block_card"}), 200
                 else:
-                    text_reply = "💳 Prepaid Card — features: Reloadable, safe for online shopping, no bank account required."
+                    reply_text = "I couldn't block the card right now. Please contact support."
+                    reply_html = reply_text + "\n" + format_entity_html("block_card")
+                    return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "block_card", "entity": "block_card"}), 200
 
-                reply_html = f"{text_reply}<div class='entity-tag'>Entity: [card_info - {ctype}]</div>"
-                return jsonify({
-                    "reply": f"{text_reply} card_info",
-                    "reply_html": reply_html,
-                    "intent": "card_info"
-                }), 200
-            else:
-                dialog["fallbacks"] = dialog.get("fallbacks", 0) + 1
-                session["dialog"] = dialog
-                if dialog["fallbacks"] >= 3:
-                    end_dialog(success=False)
-                    return jsonify({"reply": "I couldn't detect card type. Please try again later.", "intent": "fallback"}), 200
-                return jsonify({"reply": "Which card would you like details for? Credit Card, Debit Card, or Prepaid Card? card_info", "intent": "ask_card_type"}), 200
+            # fallback inside card dialog
+            reply_text = "Please choose a valid option: credit, debit, prepaid, or 'block' to block the card."
+            reply_html = reply_text + "\n" + format_entity_html("card_flow")
+            dialog["fallbacks"] = dialog.get("fallbacks", 0) + 1
+            session["dialog"] = dialog
+            if dialog["fallbacks"] >= 3:
+                end_dialog(success=False)
+                return jsonify({"reply": "Let's start over. How can I help with cards?", "intent": "fallback"}), 200
+            return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "card_flow"}), 200
 
-        # Loan followup: detect which loan and respond
-        if intent == "loan_info":
-            if "personal" in text:
-                slots["loan_type"] = "personal"
-            elif "home" in text or "house" in text:
-                slots["loan_type"] = "home"
-            elif "car" in text:
-                slots["loan_type"] = "car"
-            elif "education" in text or "student" in text:
-                slots["loan_type"] = "education"
-
-            if slots.get("loan_type"):
-                ltype = slots["loan_type"]
+        # Loan dialog: expecting a loan type
+        if intent == "loan_flow":
+            found = re.search(r"\b(personal|home|car|education|educational)\b", lower)
+            if found:
+                typ = found.group(1)
+                typ_clean = "education" if typ in ("education", "educational") else typ
+                slots["loan_type"] = typ_clean
                 session["dialog"]["slots"] = slots
-                end_dialog(success=True)
+                # provide details
+                reply_text = f"🏦 Available info for {typ_clean.title()} Loan: rates, EMI calculator and eligibility details. Would you like EMI or eligibility?"
+                reply_html = reply_text + "\n" + format_entity_html("loan_info")
+                return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "loan_info", "entity": "loan_info"}), 200
 
-                if ltype == "personal":
-                    text_reply = "🏦 Personal Loan — unsecured, quick disbursal, suitable for short-term needs."
-                elif ltype == "home":
-                    text_reply = "🏠 Home Loan — lower interest, long tenure, requires property as collateral."
-                elif ltype == "car":
-                    text_reply = "🚗 Car Loan — financing for vehicle purchase with competitive EMI plans."
-                else:
-                    text_reply = "🎓 Education Loan — funds for tuition, competitive interest with moratorium options."
+            dialog["fallbacks"] = dialog.get("fallbacks", 0) + 1
+            session["dialog"] = dialog
+            reply_text = "Which loan type would you like? (personal, home, car or education)"
+            reply_html = reply_text + "\n" + format_entity_html("loan_flow")
+            if dialog["fallbacks"] >= 3:
+                end_dialog(success=False)
+                return jsonify({"reply": "I couldn't get the loan type. Try again later.", "intent": "fallback"}), 200
+            return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "loan_flow"}), 200
 
-                reply_html = f"{text_reply}<div class='entity-tag'>Entity: [loan_info - {ltype}]</div>"
-                return jsonify({
-                    "reply": f"{text_reply} loan_info",
-                    "reply_html": reply_html,
-                    "intent": "loan_info"
-                }), 200
-            else:
-                dialog["fallbacks"] = dialog.get("fallbacks", 0) + 1
-                session["dialog"] = dialog
-                if dialog["fallbacks"] >= 3:
-                    end_dialog(success=False)
-                    return jsonify({"reply": "I couldn't detect loan type. Please try again later.", "intent": "fallback"}), 200
-                return jsonify({"reply": "Which loan type? Personal, Home, Car, or Education? loan_info", "intent": "ask_loan_type"}), 200
+        # If dialog exists but not a handled dialog, let it fallthrough to NLU below
+        # (do nothing special here)
 
-        # Generic fallback for active dialog
-        dialog["fallbacks"] = dialog.get("fallbacks", 0) + 1
-        session["dialog"] = dialog
-        if dialog["fallbacks"] >= 3:
-            end_dialog(success=False)
-            return jsonify({"reply": "I couldn't handle that follow-up. Let's start over.", "intent": "fallback"}), 200
-        return jsonify({"reply": "I didn't understand that follow-up. Could you rephrase?", "intent": "fallback"}), 200
+    # 1) Quick rules / direct intents
 
-    # ------- 1) Quick replies for common phrases -------
-    if re.search(r"\bloan(s)?\b", text) or "emi" in text or "interest" in text:
-        # Start loan dialog
-        start_dialog("loan_info", slots={})
-        return jsonify({"reply": "🏦 Available loan types: Personal Loan, Home Loan, Car Loan, and Education Loan. Which one would you like? loan_info", "intent": "loan_info"}), 200
-
-    if re.search(r"\b(card|cards|credit|debit|prepaid)\b", text):
-        # Start card dialog
-        start_dialog("card_info", slots={})
-        return jsonify({"reply": "💳 Which card would you like details for? Credit Card, Debit Card, or Prepaid Card? card_info", "intent": "card_info"}), 200
-
-    amount, recipient = parse_transfer(msg)
+    # Transfer: treat as immediate action — clear any dialog
+    amount, recipient = parse_transfer(text)
     if amount is not None and recipient:
+        # end any previous dialog: user moved onto transfer
+        end_dialog(success=True)
+
         reply_text = f"✅ Transfer initiated: {fmt_rupees(amount)} to {recipient}. You'll get an OTP to confirm."
-        reply_html = f"{reply_text}<div class='entity-tag'>Entity: [transfer_help]</div>"
-        return jsonify({"reply": f"{reply_text} transfer_help", "reply_html": reply_html, "intent": "transfer_help"}), 200
+        reply_html = reply_text + "\n" + format_entity_html("transfer_help")
+        return jsonify({
+            "reply": reply_text,
+            "reply_html": reply_html,
+            "intent": "transfer_help",
+            "entity": "transfer_help"
+        }), 200
 
-    if any(w in text for w in ("hi", "hello", "hey")):
+    # Greeting
+    if re.search(r"\b(hi|hello|hey|hey there|good morning|good evening)\b", lower):
         rep = reply_from_csv_or_default(["greet"], "👋 Hello! Ask me about balance, last transactions, loans, cards or transfers.")
-        reply_html = f"{rep}<div class='entity-tag'>Entity: [greet]</div>"
-        return jsonify({"reply": f"{rep} greet", "reply_html": reply_html, "intent": "greet"}), 200
+        reply_text = rep
+        reply_html = reply_text + "\n" + format_entity_html("greet")
+        return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "greet", "entity": "greet"}), 200
 
-    # Start balance dialog
-    if "balance" in text or "account balance" in text or "how much" in text:
-        start_dialog("balance_check")
-        return jsonify({"reply": "Sure — please provide your account number (digits only). balance_check", "intent": "balance_check"}), 200
+    # Cards (start a card dialog)
+    if re.search(r"\b(card|cards|credit|debit|prepaid)\b", lower) and "transfer" not in lower:
+        # Start card dialog
+        start_dialog("card_flow", {})
+        reply_text = "Which card would you like details for? Credit Card, Debit Card, or Prepaid Card? You can also say 'block' after selecting the card."
+        reply_html = reply_text + "\n" + format_entity_html("card_flow")
+        return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "card_flow", "entity": "card_flow"}), 200
 
-    # Use NLU if available
+    # Loans (start a loan dialog)
+    if re.search(r"\bloan(s)?\b", lower) or "emi" in lower or "interest" in lower:
+        start_dialog("loan_flow", {})
+        reply_text = "🏦 Available loan types: Personal Loan, Home Loan, Car Loan, and Education Loan. Which one would you like?"
+        reply_html = reply_text + "\n" + format_entity_html("loan_flow")
+        return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "loan_flow", "entity": "loan_flow"}), 200
+
+    # Card/loan quick info mapping via NLU or CSV
     if nlu:
         try:
             predicted = nlu.parse(msg)
+            # last_transactions
             if predicted == "last_transactions":
                 txns = get_last_transactions(session["user"]["id"], limit=5)
-                reply_html = f"📊 Here are your last transactions.<div class='entity-tag'>Entity: [last_transactions]</div>"
-                return jsonify({"reply": "📊 Here are your last transactions. last_transactions", "transactions": txns, "reply_html": reply_html, "intent": "last_transactions"}), 200
+                reply_text = "📊 Here are your last transactions."
+                reply_html = reply_text + "\n" + format_entity_html("last_transactions")
+                return jsonify({"reply": reply_text, "reply_html": reply_html, "transactions": txns, "intent": "last_transactions", "entity": "last_transactions", "action": "show_last_txns"}), 200
+
             csv_reply = reply_from_csv_or_default([predicted], None)
             if csv_reply:
-                reply_html = f"{csv_reply}<div class='entity-tag'>Entity: [{predicted}]</div>"
-                return jsonify({"reply": f"{csv_reply} {predicted}", "reply_html": reply_html, "intent": predicted}), 200
+                reply_text = csv_reply
+                reply_html = reply_text + "\n" + format_entity_html(predicted)
+                return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": predicted, "entity": predicted}), 200
         except Exception:
             pass
 
-    # Final fallback
-    return jsonify({"reply": "I didn’t quite get that, but I’m here to help. fallback", "intent": "fallback"}), 200
+    # fallback
+    reply_text = "I didn’t quite get that, but I’m here to help."
+    reply_html = reply_text + "\n" + format_entity_html("fallback")
+    return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "fallback", "entity": "fallback"}), 200
 
 # ---------------- Main -----------------------------
 if __name__ == "__main__":
