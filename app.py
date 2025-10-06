@@ -145,13 +145,13 @@ def manager_page():
         return redirect(url_for("role_select"))
     return render_template("manager.html")
 
-@app.route("/employee")
+@app.route("/admin")
 @login_required
 def employee_page():
-    if session.get("user", {}).get("role") != "employee":
-        flash("Access denied: employees only.", "error")
+    if session.get("user", {}).get("role") != "admin":
+        flash("Access denied: admin only.", "error")
         return redirect(url_for("role_select"))
-    return render_template("employee.html")
+    return render_template("admin.html")
 
 @app.route("/user-dashboard")
 @login_required
