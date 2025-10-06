@@ -1,21 +1,164 @@
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Employee — BankBot</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body class="page">
-  <header class="topbar">
-    <div>Employee: <strong>{{ current_user.full_name }}</strong></div>
-    <nav><a href="{{ url_for('role_select') }}">Back</a> | <a href="{{ url_for('logout_page') }}">Logout</a></nav>
-  </header>
-  <main class="container">
-    <h1>Employee Workspace</h1>
-    <p>Placeholder employee features (KYC, service tickets, etc.).</p>
-    <div class="notice">Chatbot is only available to customer users.</div>
-  </main>
-</body>
-</html>
+{% extends "base.html" %}
+{% block title %}Admin Dashboard — BankBot{% endblock %}
+
+{% block content %}
+<style>
+  .admin-container {
+    max-width: 1000px;
+    margin: 2rem auto;
+    background: var(--card);
+    border: 1px solid var(--soft);
+    border-radius: 18px;
+    padding: 1.8rem;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  }
+
+  .admin-header {
+    font-size: 1.8rem;
+    font-weight: 600;
+    background: linear-gradient(90deg, #5de2a5, #5661ff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 1.4rem;
+  }
+
+  h3 {
+    font-size: 1.2rem;
+    margin-top: 1.8rem;
+    margin-bottom: .8rem;
+    color: #cfd4ff;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: .5rem;
+  }
+
+  th, td {
+    border: 1px solid #333a66;
+    padding: .6rem .9rem;
+    text-align: left;
+    font-size: 0.92rem;
+  }
+
+  th {
+    background-color: #1e254a;
+    color: #a9b4ff;
+  }
+
+  tr:nth-child(even) {
+    background-color: #151c3b;
+  }
+
+  button {
+    background: linear-gradient(90deg, #5661ff, #8b5cf6);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 0.6rem 1.2rem;
+    cursor: pointer;
+    font-weight: 600;
+  }
+
+  button:hover {
+    opacity: 0.9;
+  }
+
+  textarea {
+    width: 100%;
+    height: 160px;
+    background: #0f1633;
+    color: #fff;
+    border-radius: 10px;
+    border: 1px solid #444b7d;
+    padding: 0.6rem;
+    resize: vertical;
+  }
+
+  .chart-container {
+    margin-top: 1.5rem;
+  }
+
+  canvas {
+    background: #0e1430;
+    border-radius: 10px;
+    padding: 1rem;
+  }
+</style>
+
+<div class="admin-container">
+  <div class="admin-header">👩‍💼 Admin Dashboard</div>
+  <p>Welcome, <strong>{{ current_user.full_name }}</strong> — manage BankBot model and view analytics here.</p>
+
+  <!-- Logs Section -->
+  <h3>🗂 User Chat Logs</h3>
+  {% if logs %}
+  <table>
+    <tr><th>User</th><th>Message</th><th>Intent</th><th>Timestamp</th></tr>
+    {% for log in logs %}
+    <tr>
+      <td>{{ log.username }}</td>
+      <td>{{ log.message }}</td>
+      <td>{{ log.intent }}</td>
+      <td>{{ log.timestamp }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p>No logs found.</p>
+  {% endif %}
+
+  <!-- Training Data -->
+  <h3>🧠 Training Data</h3>
+  <form method="post" action="{{ url_for('update_training_data') }}">
+    <textarea name="training_data" placeholder="intent,text,response">{{ training_data }}</textarea>
+    <button type="submit">💾 Save Changes</button>
+    <button type="button" onclick="location.href='{{ url_for('retrain_model') }}'">🔄 Retrain Model</button>
+  </form>
+
+  <!-- Analytics -->
+  <h3>📊 Analytics</h3>
+  <div class="chart-container">
+    <canvas id="intentChart" width="400" height="200"></canvas>
+  </div>
+  <div class="chart-container">
+    <canvas id="queryChart" width="400" height="200"></canvas>
+  </div>
+</div>
+
+<!-- Chart.js CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+  const intentData = {{ intent_stats|tojson }};
+  const topQueries = {{ top_queries|tojson }};
+
+  const ctx1 = document.getElementById('intentChart').getContext('2d');
+  new Chart(ctx1, {
+    type: 'bar',
+    data: {
+      labels: intentData.map(i => i.intent),
+      datasets: [{
+        label: 'Intent Frequency',
+        data: intentData.map(i => i.count),
+        backgroundColor: '#5661ff'
+      }]
+    }
+  });
+
+  const ctx2 = document.getElementById('queryChart').getContext('2d');
+  new Chart(ctx2, {
+    type: 'pie',
+    data: {
+      labels: topQueries.map(q => q.query),
+      datasets: [{
+        label: 'Top Queries',
+        data: topQueries.map(q => q.count),
+        backgroundColor: ['#5de2a5','#8b5cf6','#5661ff','#f59e0b','#ef4444']
+      }]
+    }
+  });
+</script>
+{% endblock %}
+
 

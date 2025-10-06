@@ -63,7 +63,8 @@ def init_db(seed=True):
         if row["c"] == 0:
             samples = [
                 ("manager01", "Priya Manager", "manager", "Manager@123"),
-                ("employee01", "Admin User", "admin", "Employee@123"),
+                ("admin01", "Ravi Admin", "admin", "Admin@123"),
+
             ]
             for i in range(1, 9):
                 samples.append((f"user{i:02d}", f"User {i:02d}", "user", f"User{i:02d}@123"))
