@@ -17,7 +17,8 @@ from db import (
     load_training_csv,
     save_training_csv,
     get_intent_stats,
-    get_top_queries
+    get_top_queries,
+    log_chat_message
 )
 from nlu_runtime import TinyNLU
 
@@ -29,6 +30,9 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=False,  # set True when behind HTTPS
 )
+
+# Bank name (change here)
+BANK_NAME = os.environ.get("BANK_NAME", "Aurora Bank")
 
 # ---------------- Bootstrap DB & NLU ----------------
 init_db(seed=True)
@@ -50,8 +54,8 @@ except Exception as e:
 # ---------------- Context processor ----------------
 @app.context_processor
 def inject_user():
-    # Makes 'current_user' available inside Jinja templates
-    return {"current_user": session.get("user")}
+    # Makes 'current_user' and bank_name available inside Jinja templates
+    return {"current_user": session.get("user"), "bank_name": BANK_NAME}
 
 # ---------------- Helpers -------------------------
 def fmt_rupees(amount: float) -> str:
@@ -84,11 +88,6 @@ def reply_from_csv_or_default(keys, default_text):
     return default_text
 
 def format_entity_html(entity_name: str) -> str:
-    """
-    HTML fragment that renders the entity in the next line with your .entity-tag CSS.
-    Example output:
-      <div class="entity-tag">Entity : [transfer_help]</div>
-    """
     safe_name = (entity_name or "").strip()
     return f'<div class="entity-tag">Entity : [{safe_name}]</div>'
 
@@ -159,23 +158,18 @@ def manager_page():
         return redirect(url_for("role_select"))
     return render_template("manager.html")
 
-# Single admin endpoint (function name admin_page) — avoid duplicates
+# Single admin endpoint
 @app.route("/admin")
 @login_required
 def admin_page():
+    # allow admin OR legacy employee; optionally manager as well
     if session.get("user", {}).get("role") not in ("admin", "employee", "manager"):
-        # allow manager for convenience; otherwise restrict to admin/employee depending on your policy
         flash("Access denied: admin only.", "error")
         return redirect(url_for("role_select"))
 
-    # Use db helpers to fetch logs, training CSV, analytics
-    logs = []
-    training_data = ""
-    intent_stats = []
-    top_queries = []
-
+    # fetch latest 40 chats for recent window
     try:
-        logs = fetch_chat_logs()
+        logs = fetch_chat_logs(limit=40)
     except Exception:
         logs = []
 
@@ -194,7 +188,7 @@ def admin_page():
     except Exception:
         top_queries = []
 
-    # NOTE: render admin_dashboard.html because your template is named admin_dashboard.html
+    # note: your template is named admin_dashboard.html — render that
     return render_template(
         "admin_dashboard.html",
         logs=logs,
@@ -318,6 +312,12 @@ def chat():
                 end_dialog(success=True)
                 reply_text = f"💰 Balance for account {acct} is {fmt_rupees(total)}."
                 reply_html = reply_text + "\n" + format_entity_html("balance_check")
+                # log user message and bot reply
+                try:
+                    log_chat_message(session["user"]["id"], msg, "balance_check_request")
+                    log_chat_message(session["user"]["id"], reply_text, "bot_reply")
+                except Exception:
+                    pass
                 return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "balance_check", "entity": "balance_check", "action": "show_balance"}), 200
             else:
                 dialog["fallbacks"] = dialog.get("fallbacks", 0) + 1
@@ -327,6 +327,10 @@ def chat():
                     return jsonify({"reply": "I couldn't read the account number. Please try later.", "intent": "fallback"}), 200
                 reply_text = "Please provide your account number (digits only)."
                 reply_html = reply_text + "\n" + format_entity_html("balance_check")
+                try:
+                    log_chat_message(session["user"]["id"], msg, "balance_check_request")
+                except Exception:
+                    pass
                 return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "ask_account_number"}), 200
 
         # Card dialog
@@ -338,6 +342,11 @@ def chat():
                 session["dialog"]["slots"] = slots
                 reply_text = f"📋 Details for {card_type_clean.title()} Card. What would you like to do? (info / block)"
                 reply_html = reply_text + "\n" + format_entity_html("card_info")
+                try:
+                    log_chat_message(session["user"]["id"], msg, "card_flow")
+                    log_chat_message(session["user"]["id"], reply_text, "bot_reply")
+                except Exception:
+                    pass
                 return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "card_info", "entity": "card_info"}), 200
 
             if re.search(r"\b(block|disable|freeze)\b", lower):
@@ -351,16 +360,30 @@ def chat():
                     end_dialog(success=True)
                     reply_text = f"✅ {card_type.title()} blocked successfully."
                     reply_html = reply_text + "\n" + format_entity_html("block_card")
+                    try:
+                        log_chat_message(session["user"]["id"], msg, "block_card_request")
+                        log_chat_message(session["user"]["id"], reply_text, "bot_reply")
+                    except Exception:
+                        pass
                     return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "block_card", "entity": "block_card"}), 200
                 else:
                     reply_text = "I couldn't block the card right now. Please contact support."
                     reply_html = reply_text + "\n" + format_entity_html("block_card")
+                    try:
+                        log_chat_message(session["user"]["id"], msg, "block_card_request")
+                        log_chat_message(session["user"]["id"], reply_text, "bot_reply")
+                    except Exception:
+                        pass
                     return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "block_card", "entity": "block_card"}), 200
 
             dialog["fallbacks"] = dialog.get("fallbacks", 0) + 1
             session["dialog"] = dialog
             reply_text = "Please choose a valid option: credit, debit, prepaid, or 'block' to block the card."
             reply_html = reply_text + "\n" + format_entity_html("card_flow")
+            try:
+                log_chat_message(session["user"]["id"], msg, "card_flow_fallback")
+            except Exception:
+                pass
             if dialog["fallbacks"] >= 3:
                 end_dialog(success=False)
                 return jsonify({"reply": "Let's start over. How can I help with cards?", "intent": "fallback"}), 200
@@ -376,12 +399,21 @@ def chat():
                 session["dialog"]["slots"] = slots
                 reply_text = f"🏦 Available info for {typ_clean.title()} Loan: rates, EMI calculator and eligibility details. Would you like EMI or eligibility?"
                 reply_html = reply_text + "\n" + format_entity_html("loan_info")
+                try:
+                    log_chat_message(session["user"]["id"], msg, "loan_flow")
+                    log_chat_message(session["user"]["id"], reply_text, "bot_reply")
+                except Exception:
+                    pass
                 return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "loan_info", "entity": "loan_info"}), 200
 
             dialog["fallbacks"] = dialog.get("fallbacks", 0) + 1
             session["dialog"] = dialog
             reply_text = "Which loan type would you like? (personal, home, car or education)"
             reply_html = reply_text + "\n" + format_entity_html("loan_flow")
+            try:
+                log_chat_message(session["user"]["id"], msg, "loan_flow_fallback")
+            except Exception:
+                pass
             if dialog["fallbacks"] >= 3:
                 end_dialog(success=False)
                 return jsonify({"reply": "I couldn't get the loan type. Try again later.", "intent": "fallback"}), 200
@@ -393,6 +425,11 @@ def chat():
         end_dialog(success=True)
         reply_text = f"✅ Transfer initiated: {fmt_rupees(amount)} to {recipient}. You'll get an OTP to confirm."
         reply_html = reply_text + "\n" + format_entity_html("transfer_help")
+        try:
+            log_chat_message(session["user"]["id"], msg, "transfer_request")
+            log_chat_message(session["user"]["id"], reply_text, "bot_reply")
+        except Exception:
+            pass
         return jsonify({
             "reply": reply_text,
             "reply_html": reply_html,
@@ -400,25 +437,43 @@ def chat():
             "entity": "transfer_help"
         }), 200
 
+    # Greeting
     if re.search(r"\b(hi|hello|hey|hey there|good morning|good evening)\b", lower):
         rep = reply_from_csv_or_default(["greet"], "👋 Hello! Ask me about balance, last transactions, loans, cards or transfers.")
         reply_text = rep
         reply_html = reply_text + "\n" + format_entity_html("greet")
+        try:
+            log_chat_message(session["user"]["id"], msg, "greet")
+            log_chat_message(session["user"]["id"], reply_text, "bot_reply")
+        except Exception:
+            pass
         return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "greet", "entity": "greet"}), 200
 
+    # Cards (start a card dialog)
     if re.search(r"\b(card|cards|credit|debit|prepaid)\b", lower) and "transfer" not in lower:
         start_dialog("card_flow", {})
         reply_text = "Which card would you like details for? Credit Card, Debit Card, or Prepaid Card? You can also say 'block' after selecting the card."
         reply_html = reply_text + "\n" + format_entity_html("card_flow")
+        try:
+            log_chat_message(session["user"]["id"], msg, "card_flow_start")
+            log_chat_message(session["user"]["id"], reply_text, "bot_reply")
+        except Exception:
+            pass
         return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "card_flow", "entity": "card_flow"}), 200
 
+    # Loans (start a loan dialog)
     if re.search(r"\bloan(s)?\b", lower) or "emi" in lower or "interest" in lower:
         start_dialog("loan_flow", {})
         reply_text = "🏦 Available loan types: Personal Loan, Home Loan, Car Loan, and Education Loan. Which one would you like?"
         reply_html = reply_text + "\n" + format_entity_html("loan_flow")
+        try:
+            log_chat_message(session["user"]["id"], msg, "loan_flow_start")
+            log_chat_message(session["user"]["id"], reply_text, "bot_reply")
+        except Exception:
+            pass
         return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "loan_flow", "entity": "loan_flow"}), 200
 
-    # 2) NLU fallback
+    # NLU fallback
     if nlu:
         try:
             predicted = nlu.parse(msg)
@@ -426,12 +481,22 @@ def chat():
                 txns = get_last_transactions(session["user"]["id"], limit=5)
                 reply_text = "📊 Here are your last transactions."
                 reply_html = reply_text + "\n" + format_entity_html("last_transactions")
+                try:
+                    log_chat_message(session["user"]["id"], msg, "last_transactions")
+                    log_chat_message(session["user"]["id"], reply_text, "bot_reply")
+                except Exception:
+                    pass
                 return jsonify({"reply": reply_text, "reply_html": reply_html, "transactions": txns, "intent": "last_transactions", "entity": "last_transactions", "action": "show_last_txns"}), 200
 
             csv_reply = reply_from_csv_or_default([predicted], None)
             if csv_reply:
                 reply_text = csv_reply
                 reply_html = reply_text + "\n" + format_entity_html(predicted)
+                try:
+                    log_chat_message(session["user"]["id"], msg, predicted)
+                    log_chat_message(session["user"]["id"], reply_text, "bot_reply")
+                except Exception:
+                    pass
                 return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": predicted, "entity": predicted}), 200
         except Exception:
             pass
@@ -439,6 +504,11 @@ def chat():
     # fallback
     reply_text = "I didn’t quite get that, but I’m here to help."
     reply_html = reply_text + "\n" + format_entity_html("fallback")
+    try:
+        log_chat_message(session["user"]["id"], msg, "fallback_user")
+        log_chat_message(session["user"]["id"], reply_text, "bot_reply")
+    except Exception:
+        pass
     return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "fallback", "entity": "fallback"}), 200
 
 # ---------------- Main -----------------------------
