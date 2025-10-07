@@ -51,8 +51,7 @@ def init_db(seed=True):
 
     CREATE TABLE IF NOT EXISTS chat_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        username TEXT,
+        user_id INTEGER NOT NULL,
         message TEXT NOT NULL,
         intent TEXT,
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -62,7 +61,7 @@ def init_db(seed=True):
 
     conn.commit()
 
-    # ---------- SEED USERS, ACCOUNTS, TRANSACTIONS ----------
+    # ---------- SEED USERS ----------
     if seed:
         row = cur.execute("SELECT COUNT(*) AS c FROM users").fetchone()
         if row["c"] == 0:
@@ -70,8 +69,6 @@ def init_db(seed=True):
                 ("manager01", "Priya Manager", "manager", "Manager@123"),
                 ("admin01", "Ravi Admin", "admin", "Admin@123"),
             ]
-
-            # 8 sample users
             for i in range(1, 9):
                 samples.append((f"user{i:02d}", f"User {i:02d}", "user", f"User{i:02d}@123"))
 
@@ -82,7 +79,6 @@ def init_db(seed=True):
                 )
             conn.commit()
 
-            # Create accounts for user roles
             users = cur.execute("SELECT id, username FROM users WHERE role='user'").fetchall()
             for u in users:
                 acct = f"SB{u['id']:04d}{u['username'][-2:]}"
@@ -93,9 +89,8 @@ def init_db(seed=True):
                 )
             conn.commit()
 
-            # Create 10 sample transactions
-            accts = cur.execute("SELECT id FROM accounts").fetchall()
             import random
+            accts = cur.execute("SELECT id FROM accounts").fetchall()
             for a in accts:
                 for j in range(10):
                     t = dt.datetime.now() - dt.timedelta(days=j, hours=random.randint(0, 23))
@@ -110,7 +105,6 @@ def init_db(seed=True):
                         (a["id"], t.isoformat(timespec="seconds"), desc, amt, typ),
                     )
             conn.commit()
-
     conn.close()
 
 # ------------------ AUTH ---------------------
@@ -123,17 +117,11 @@ def verify_user(username, password):
     return None
 
 # ------------------ ACCOUNTS ---------------------
-def get_user_accounts(user_id):
-    conn = get_conn()
-    rows = conn.execute("SELECT * FROM accounts WHERE user_id=?", (user_id,)).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
 def get_balance(user_id):
     conn = get_conn()
     row = conn.execute("SELECT SUM(balance) AS total FROM accounts WHERE user_id=?", (user_id,)).fetchone()
     conn.close()
-    return (row["total"] or 0.0)
+    return row["total"] or 0.0
 
 def get_last_transactions(user_id, limit=5):
     conn = get_conn()
@@ -148,75 +136,39 @@ def get_last_transactions(user_id, limit=5):
     return [dict(r) for r in rows]
 
 # ------------------ CHAT LOGGING ---------------------
-def save_chat_log(username, message, intent=None):
-    """
-    Stores chatbot messages for analytics and admin viewing.
-    """
+def log_chat_message(user_id, message, intent):
+    """Insert one chat message (user or bot) into chat_logs"""
     conn = get_conn()
-    try:
-        user_row = conn.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
-        user_id = user_row["id"] if user_row else None
-        conn.execute(
-            "INSERT INTO chat_logs (user_id, username, message, intent) VALUES (?,?,?,?)",
-            (user_id, username, message, intent),
-        )
-        conn.commit()
-    except Exception as e:
-        print("[WARN] save_chat_log failed:", e)
-    finally:
-        conn.close()
+    conn.execute(
+        "INSERT INTO chat_logs (user_id, message, intent) VALUES (?,?,?)",
+        (user_id, message, intent),
+    )
+    conn.commit()
+    conn.close()
 
 def fetch_chat_logs(limit=40):
-    """
-    Returns the most recent chat logs (default last 40) as a list of dicts:
-    {id, username, message, intent, timestamp}
-    """
     conn = get_conn()
-    try:
-        rows = conn.execute("""
-            SELECT id, username, message, intent, timestamp
-            FROM chat_logs
-            ORDER BY datetime(timestamp) DESC
-            LIMIT ?
-        """, (limit,)).fetchall()
-        return [dict(r) for r in rows]
-    except sqlite3.OperationalError:
-        # table missing or corrupted
-        return []
-    finally:
-        conn.close()
+    rows = conn.execute("""
+        SELECT c.id, u.username, c.message, c.intent, c.timestamp
+        FROM chat_logs c
+        JOIN users u ON u.id = c.user_id
+        ORDER BY datetime(c.timestamp) DESC
+        LIMIT ?
+    """, (limit,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 # ------------------ TRAINING DATA ---------------------
 def load_training_csv():
-    """
-    Returns training CSV rows as list of dicts.
-    """
     if not TRAINING_DATA.exists():
-        return []
+        return ""
     with open(TRAINING_DATA, "r", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        return [r for r in reader]
+        return f.read()
 
 def save_training_csv(data):
-    """
-    Saves updated training data to CSV file.
-    'data' can be a list of dicts or plain string CSV.
-    """
     os.makedirs(TRAINING_DATA.parent, exist_ok=True)
-
-    # If a plain string (from textarea), save directly
-    if isinstance(data, str):
-        with open(TRAINING_DATA, "w", encoding="utf-8") as f:
-            f.write(data.strip())
-        return
-
-    # Otherwise, list of dicts
-    if not data:
-        return
-    with open(TRAINING_DATA, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=data[0].keys())
-        writer.writeheader()
-        writer.writerows(data)
+    with open(TRAINING_DATA, "w", encoding="utf-8") as f:
+        f.write(data or "")
 
 # ------------------ ANALYTICS ---------------------
 def get_intent_stats():
@@ -245,9 +197,6 @@ def get_top_queries(limit=10):
 
 # ------------------ BLOCK CARD ---------------------
 def block_card_for_user(user_id, card_type):
-    """
-    Simulates blocking a card by logging an event.
-    """
     conn = get_conn()
     conn.execute(
         "INSERT INTO chat_logs (user_id, message, intent) VALUES (?,?,?)",
@@ -256,3 +205,22 @@ def block_card_for_user(user_id, card_type):
     conn.commit()
     conn.close()
     return True
+
+# ------------------ CSV EXPORT ---------------------
+def export_chat_logs_csv(path: Path):
+    """Write all chat_logs as CSV to the given path and return the path."""
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT c.id, u.username, c.message, c.intent, c.timestamp
+        FROM chat_logs c
+        JOIN users u ON u.id = c.user_id
+        ORDER BY datetime(c.timestamp) DESC
+    """).fetchall()
+    conn.close()
+    os.makedirs(path.parent, exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["id","username","message","intent","timestamp"])
+        writer.writeheader()
+        for r in rows:
+            writer.writerow(dict(r))
+    return path

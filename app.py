@@ -511,6 +511,26 @@ def chat():
         pass
     return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "fallback", "entity": "fallback"}), 200
 
+from flask import send_file
+from io import BytesIO
+import tempfile
+
+@app.route("/admin/download-logs")
+@login_required
+def download_logs_csv():
+    if session.get("user", {}).get("role") not in ("admin", "employee", "manager"):
+        flash("Access denied: admin only.", "error")
+        return redirect(url_for("role_select"))
+
+    try:
+        from db import export_chat_logs_csv
+        tmpfile = Path(tempfile.gettempdir()) / "chat_logs.csv"
+        export_chat_logs_csv(tmpfile)
+        return send_file(tmpfile, as_attachment=True, download_name="chat_logs.csv", mimetype="text/csv")
+    except Exception as e:
+        flash(f"Download failed: {e}", "error")
+        return redirect(url_for("admin_page"))
+
 # ---------------- Main -----------------------------
 if __name__ == "__main__":
     app.run(debug=True)
