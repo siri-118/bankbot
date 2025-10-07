@@ -1,10 +1,12 @@
 # app.py (full file) — drop-in replacement
 from flask import (
     Flask, render_template, request, redirect, url_for,
-    session, jsonify, flash
+    session, jsonify, flash, send_file
 )
 from pathlib import Path
-import os, re, random
+import os, re, random, tempfile
+from io import BytesIO
+import datetime as dt
 
 # Local modules (make sure db.py contains these functions)
 from db import (
@@ -18,7 +20,8 @@ from db import (
     save_training_csv,
     get_intent_stats,
     get_top_queries,
-    log_chat_message
+    log_chat_message,
+    export_chat_logs_csv
 )
 from nlu_runtime import TinyNLU
 
@@ -30,9 +33,6 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=False,  # set True when behind HTTPS
 )
-
-# Bank name (change here)
-BANK_NAME = os.environ.get("BANK_NAME", "Aurora Bank")
 
 # ---------------- Bootstrap DB & NLU ----------------
 init_db(seed=True)
@@ -54,8 +54,8 @@ except Exception as e:
 # ---------------- Context processor ----------------
 @app.context_processor
 def inject_user():
-    # Makes 'current_user' and bank_name available inside Jinja templates
-    return {"current_user": session.get("user"), "bank_name": BANK_NAME}
+    # Makes 'current_user' available inside Jinja templates
+    return {"current_user": session.get("user")}
 
 # ---------------- Helpers -------------------------
 def fmt_rupees(amount: float) -> str:
@@ -88,6 +88,11 @@ def reply_from_csv_or_default(keys, default_text):
     return default_text
 
 def format_entity_html(entity_name: str) -> str:
+    """
+    HTML fragment that renders the entity in the next line with your .entity-tag CSS.
+    Example output:
+      <div class="entity-tag">Entity : [transfer_help]</div>
+    """
     safe_name = (entity_name or "").strip()
     return f'<div class="entity-tag">Entity : [{safe_name}]</div>'
 
@@ -158,17 +163,22 @@ def manager_page():
         return redirect(url_for("role_select"))
     return render_template("manager.html")
 
-# Single admin endpoint
+# Single admin endpoint (function name admin_page) — ensure template name matches your file
 @app.route("/admin")
 @login_required
 def admin_page():
-    # allow admin OR legacy employee; optionally manager as well
     if session.get("user", {}).get("role") not in ("admin", "employee", "manager"):
         flash("Access denied: admin only.", "error")
         return redirect(url_for("role_select"))
 
-    # fetch latest 40 chats for recent window
+    # Use db helpers to fetch logs, training CSV, analytics
+    logs = []
+    training_data = ""
+    intent_stats = []
+    top_queries = []
+
     try:
+        # return last 40 chats
         logs = fetch_chat_logs(limit=40)
     except Exception:
         logs = []
@@ -188,7 +198,8 @@ def admin_page():
     except Exception:
         top_queries = []
 
-    # note: your template is named admin_dashboard.html — render that
+    # Render your admin dashboard template (you said you replaced admin.html with admin_dashboard.html)
+    # Change this string to match the exact filename in templates/ (admin_dashboard.html or admin.html)
     return render_template(
         "admin_dashboard.html",
         logs=logs,
@@ -280,6 +291,22 @@ def retrain_model():
         flash(f"Retrain failed: {e}", "error")
     return redirect(url_for("admin_page"))
 
+# ---------------- Admin CSV download (Option 2) ----------------
+@app.route("/admin/download-logs")
+@login_required
+def download_logs_csv():
+    if session.get("user", {}).get("role") not in ("admin", "employee", "manager"):
+        flash("Access denied: admin only.", "error")
+        return redirect(url_for("role_select"))
+
+    try:
+        tmpfile = Path(tempfile.gettempdir()) / f"chat_logs_{dt.date.today().isoformat()}.csv"
+        export_chat_logs_csv(tmpfile)
+        return send_file(tmpfile, as_attachment=True, download_name=tmpfile.name, mimetype="text/csv")
+    except Exception as e:
+        flash(f"Download failed: {e}", "error")
+        return redirect(url_for("admin_page"))
+
 # ---------------- Chatbot API ----------------------
 @app.route("/chat", methods=["POST"])
 @login_required
@@ -291,6 +318,13 @@ def chat():
     msg = (payload.get("message") or "").strip()
     if not msg:
         return jsonify({"reply": "Please type a message.", "intent": "fallback"}), 200
+
+    user_id = session["user"]["id"]
+    # log user message
+    try:
+        log_chat_message(user_id, msg, None)
+    except Exception:
+        pass
 
     text = msg.strip()
     lower = text.lower()
@@ -312,10 +346,9 @@ def chat():
                 end_dialog(success=True)
                 reply_text = f"💰 Balance for account {acct} is {fmt_rupees(total)}."
                 reply_html = reply_text + "\n" + format_entity_html("balance_check")
-                # log user message and bot reply
+                # log bot reply
                 try:
-                    log_chat_message(session["user"]["id"], msg, "balance_check_request")
-                    log_chat_message(session["user"]["id"], reply_text, "bot_reply")
+                    log_chat_message(user_id, reply_text, "balance_check")
                 except Exception:
                     pass
                 return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "balance_check", "entity": "balance_check", "action": "show_balance"}), 200
@@ -328,7 +361,7 @@ def chat():
                 reply_text = "Please provide your account number (digits only)."
                 reply_html = reply_text + "\n" + format_entity_html("balance_check")
                 try:
-                    log_chat_message(session["user"]["id"], msg, "balance_check_request")
+                    log_chat_message(user_id, reply_text, "ask_account_number")
                 except Exception:
                     pass
                 return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "ask_account_number"}), 200
@@ -343,8 +376,7 @@ def chat():
                 reply_text = f"📋 Details for {card_type_clean.title()} Card. What would you like to do? (info / block)"
                 reply_html = reply_text + "\n" + format_entity_html("card_info")
                 try:
-                    log_chat_message(session["user"]["id"], msg, "card_flow")
-                    log_chat_message(session["user"]["id"], reply_text, "bot_reply")
+                    log_chat_message(user_id, reply_text, "card_info")
                 except Exception:
                     pass
                 return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "card_info", "entity": "card_info"}), 200
@@ -361,8 +393,7 @@ def chat():
                     reply_text = f"✅ {card_type.title()} blocked successfully."
                     reply_html = reply_text + "\n" + format_entity_html("block_card")
                     try:
-                        log_chat_message(session["user"]["id"], msg, "block_card_request")
-                        log_chat_message(session["user"]["id"], reply_text, "bot_reply")
+                        log_chat_message(user_id, reply_text, "block_card")
                     except Exception:
                         pass
                     return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "block_card", "entity": "block_card"}), 200
@@ -370,8 +401,7 @@ def chat():
                     reply_text = "I couldn't block the card right now. Please contact support."
                     reply_html = reply_text + "\n" + format_entity_html("block_card")
                     try:
-                        log_chat_message(session["user"]["id"], msg, "block_card_request")
-                        log_chat_message(session["user"]["id"], reply_text, "bot_reply")
+                        log_chat_message(user_id, reply_text, "block_card")
                     except Exception:
                         pass
                     return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "block_card", "entity": "block_card"}), 200
@@ -381,7 +411,7 @@ def chat():
             reply_text = "Please choose a valid option: credit, debit, prepaid, or 'block' to block the card."
             reply_html = reply_text + "\n" + format_entity_html("card_flow")
             try:
-                log_chat_message(session["user"]["id"], msg, "card_flow_fallback")
+                log_chat_message(user_id, reply_text, "card_flow")
             except Exception:
                 pass
             if dialog["fallbacks"] >= 3:
@@ -400,8 +430,7 @@ def chat():
                 reply_text = f"🏦 Available info for {typ_clean.title()} Loan: rates, EMI calculator and eligibility details. Would you like EMI or eligibility?"
                 reply_html = reply_text + "\n" + format_entity_html("loan_info")
                 try:
-                    log_chat_message(session["user"]["id"], msg, "loan_flow")
-                    log_chat_message(session["user"]["id"], reply_text, "bot_reply")
+                    log_chat_message(user_id, reply_text, "loan_info")
                 except Exception:
                     pass
                 return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "loan_info", "entity": "loan_info"}), 200
@@ -411,13 +440,13 @@ def chat():
             reply_text = "Which loan type would you like? (personal, home, car or education)"
             reply_html = reply_text + "\n" + format_entity_html("loan_flow")
             try:
-                log_chat_message(session["user"]["id"], msg, "loan_flow_fallback")
+                log_chat_message(user_id, reply_text, "loan_flow")
             except Exception:
                 pass
             if dialog["fallbacks"] >= 3:
                 end_dialog(success=False)
                 return jsonify({"reply": "I couldn't get the loan type. Try again later.", "intent": "fallback"}), 200
-            return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "loan_flow"}), 200
+            return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "loan_flow", "entity": "loan_flow"}), 200
 
     # 1) Quick rules / direct intents
     amount, recipient = parse_transfer(text)
@@ -426,8 +455,7 @@ def chat():
         reply_text = f"✅ Transfer initiated: {fmt_rupees(amount)} to {recipient}. You'll get an OTP to confirm."
         reply_html = reply_text + "\n" + format_entity_html("transfer_help")
         try:
-            log_chat_message(session["user"]["id"], msg, "transfer_request")
-            log_chat_message(session["user"]["id"], reply_text, "bot_reply")
+            log_chat_message(user_id, reply_text, "transfer_help")
         except Exception:
             pass
         return jsonify({
@@ -437,43 +465,37 @@ def chat():
             "entity": "transfer_help"
         }), 200
 
-    # Greeting
     if re.search(r"\b(hi|hello|hey|hey there|good morning|good evening)\b", lower):
         rep = reply_from_csv_or_default(["greet"], "👋 Hello! Ask me about balance, last transactions, loans, cards or transfers.")
         reply_text = rep
         reply_html = reply_text + "\n" + format_entity_html("greet")
         try:
-            log_chat_message(session["user"]["id"], msg, "greet")
-            log_chat_message(session["user"]["id"], reply_text, "bot_reply")
+            log_chat_message(user_id, reply_text, "greet")
         except Exception:
             pass
         return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "greet", "entity": "greet"}), 200
 
-    # Cards (start a card dialog)
     if re.search(r"\b(card|cards|credit|debit|prepaid)\b", lower) and "transfer" not in lower:
         start_dialog("card_flow", {})
         reply_text = "Which card would you like details for? Credit Card, Debit Card, or Prepaid Card? You can also say 'block' after selecting the card."
         reply_html = reply_text + "\n" + format_entity_html("card_flow")
         try:
-            log_chat_message(session["user"]["id"], msg, "card_flow_start")
-            log_chat_message(session["user"]["id"], reply_text, "bot_reply")
+            log_chat_message(user_id, reply_text, "card_flow")
         except Exception:
             pass
         return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "card_flow", "entity": "card_flow"}), 200
 
-    # Loans (start a loan dialog)
     if re.search(r"\bloan(s)?\b", lower) or "emi" in lower or "interest" in lower:
         start_dialog("loan_flow", {})
         reply_text = "🏦 Available loan types: Personal Loan, Home Loan, Car Loan, and Education Loan. Which one would you like?"
         reply_html = reply_text + "\n" + format_entity_html("loan_flow")
         try:
-            log_chat_message(session["user"]["id"], msg, "loan_flow_start")
-            log_chat_message(session["user"]["id"], reply_text, "bot_reply")
+            log_chat_message(user_id, reply_text, "loan_flow")
         except Exception:
             pass
         return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "loan_flow", "entity": "loan_flow"}), 200
 
-    # NLU fallback
+    # 2) NLU fallback
     if nlu:
         try:
             predicted = nlu.parse(msg)
@@ -482,8 +504,7 @@ def chat():
                 reply_text = "📊 Here are your last transactions."
                 reply_html = reply_text + "\n" + format_entity_html("last_transactions")
                 try:
-                    log_chat_message(session["user"]["id"], msg, "last_transactions")
-                    log_chat_message(session["user"]["id"], reply_text, "bot_reply")
+                    log_chat_message(user_id, reply_text, "last_transactions")
                 except Exception:
                     pass
                 return jsonify({"reply": reply_text, "reply_html": reply_html, "transactions": txns, "intent": "last_transactions", "entity": "last_transactions", "action": "show_last_txns"}), 200
@@ -493,8 +514,7 @@ def chat():
                 reply_text = csv_reply
                 reply_html = reply_text + "\n" + format_entity_html(predicted)
                 try:
-                    log_chat_message(session["user"]["id"], msg, predicted)
-                    log_chat_message(session["user"]["id"], reply_text, "bot_reply")
+                    log_chat_message(user_id, reply_text, predicted)
                 except Exception:
                     pass
                 return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": predicted, "entity": predicted}), 200
@@ -505,31 +525,10 @@ def chat():
     reply_text = "I didn’t quite get that, but I’m here to help."
     reply_html = reply_text + "\n" + format_entity_html("fallback")
     try:
-        log_chat_message(session["user"]["id"], msg, "fallback_user")
-        log_chat_message(session["user"]["id"], reply_text, "bot_reply")
+        log_chat_message(user_id, reply_text, "fallback")
     except Exception:
         pass
     return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "fallback", "entity": "fallback"}), 200
-
-from flask import send_file
-from io import BytesIO
-import tempfile
-
-@app.route("/admin/download-logs")
-@login_required
-def download_logs_csv():
-    if session.get("user", {}).get("role") not in ("admin", "employee", "manager"):
-        flash("Access denied: admin only.", "error")
-        return redirect(url_for("role_select"))
-
-    try:
-        from db import export_chat_logs_csv
-        tmpfile = Path(tempfile.gettempdir()) / "chat_logs.csv"
-        export_chat_logs_csv(tmpfile)
-        return send_file(tmpfile, as_attachment=True, download_name="chat_logs.csv", mimetype="text/csv")
-    except Exception as e:
-        flash(f"Download failed: {e}", "error")
-        return redirect(url_for("admin_page"))
 
 # ---------------- Main -----------------------------
 if __name__ == "__main__":
