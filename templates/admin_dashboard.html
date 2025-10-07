@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Aurora Bank · Admin</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Bootstrap (CDN) -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { padding-top: 1rem; background:#f8f9fa; }
+    .card { border-radius: .75rem; }
+    .badge-kind { font-weight:600; }
+    .table-fixed { max-height: 380px; overflow:auto; display:block; }
+  </style>
+</head>
+<body>
+  <nav class="navbar navbar-dark bg-dark">
+    <div class="container-fluid">
+      <a class="navbar-brand" href="#">Aurora Bank · Admin</a>
+      <div class="d-flex">
+        <a class="btn btn-outline-light me-2" href="/">Site</a>
+        <a class="btn btn-warning" href="/logout">Logout</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container mt-4">
+    <div class="row g-3">
+      <div class="col-md-4">
+        <div class="card p-3">
+          <h6 class="text-muted mb-2">Total Login Events</h6>
+          <h2 id="total-logins">{{ total_logins }}</h2>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="card p-3">
+          <h6 class="text-muted mb-2">Recent Window</h6>
+          <h3>Last 50</h3>
+        </div>
+      </div>
+      <div class="col-md-4 d-flex align-items-start justify-content-end">
+        <div>
+          <button id="clear-logs-btn" class="btn btn-outline-danger me-2">Clear Logs</button>
+          <a class="btn btn-outline-secondary" id="download-logs" href="/admin/download_logs">Download Logs (CSV)</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="row mt-4 g-3">
+      <div class="col-lg-8">
+        <div class="card p-3">
+          <h5>Most Asked Questions (Sample)</h5>
+          <canvas id="faqChart" height="200"></canvas>
+        </div>
+
+        <div class="card p-3 mt-3">
+          <h5 class="mb-3">Recent Logins</h5>
+          <div class="mb-2 d-flex gap-2">
+            <select id="filter-kind" class="form-select w-auto">
+              <option value="">All kinds</option>
+              <option value="admin">admin</option>
+              <option value="user">user</option>
+              <option value="manager">manager</option>
+            </select>
+            <select id="filter-success" class="form-select w-auto">
+              <option value="">All results</option>
+              <option value="yes">Yes</option>
+              <option value="no">No</option>
+            </select>
+            <input id="search-user" class="form-control w-25" placeholder="Search user...">
+          </div>
+
+          <div class="table-fixed">
+            <table class="table table-hover mb-0">
+              <thead class="table-light sticky-top">
+                <tr>
+                  <th>Time</th><th>Kind</th><th>User</th><th>Success</th><th>IP</th>
+                </tr>
+              </thead>
+              <tbody id="recent-logs-body">
+                {% for log in recent_logs %}
+                <tr>
+                  <td>{{ log.time }}</td>
+                  <td><span class="badge bg-primary badge-kind">{{ log.kind }}</span></td>
+                  <td>{{ log.user }}</td>
+                  <td>{% if log.success %}<span class="badge bg-success">Yes</span>{% else %}<span class="badge bg-danger">No</span>{% endif %}</td>
+                  <td>{{ log.ip }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="col-lg-4">
+        <div class="card p-3 mb-3">
+          <h5>Add FAQ</h5>
+          <form id="add-faq-form">
+            <div class="mb-2">
+              <input name="question" class="form-control" placeholder="Question" required>
+            </div>
+            <div class="mb-2">
+              <textarea name="answer" class="form-control" placeholder="Answer" rows="4" required></textarea>
+            </div>
+            <button class="btn btn-success" type="submit">Add</button>
+          </form>
+        </div>
+
+        <div class="card p-3 mb-3">
+          <h5>Import/Export FAQs (JSON)</h5>
+          <div class="mb-2">
+            <input id="faq-import-file" type="file" accept="application/json" class="form-control">
+          </div>
+          <div class="d-flex gap-2">
+            <button id="import-faqs-btn" class="btn btn-outline-primary">Import</button>
+            <button id="export-faqs" class="btn btn-outline-secondary">Export</button>
+          </div>
+        </div>
+
+        <div class="card p-3">
+          <h6>FAQs</h6>
+          <div id="faqs-list">No FAQs yet.</div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="/static/js/admin.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
