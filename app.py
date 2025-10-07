@@ -194,8 +194,9 @@ def admin_page():
     except Exception:
         top_queries = []
 
+    # NOTE: render admin_dashboard.html because your template is named admin_dashboard.html
     return render_template(
-        "admin.html",
+        "admin_dashboard.html",
         logs=logs,
         training_data=training_data,
         intent_stats=intent_stats,
@@ -443,4 +444,3 @@ def chat():
 # ---------------- Main -----------------------------
 if __name__ == "__main__":
     app.run(debug=True)
-

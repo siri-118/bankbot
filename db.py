@@ -51,7 +51,8 @@ def init_db(seed=True):
 
     CREATE TABLE IF NOT EXISTS chat_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
+        user_id INTEGER,
+        username TEXT,
         message TEXT NOT NULL,
         intent TEXT,
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -147,46 +148,75 @@ def get_last_transactions(user_id, limit=5):
     return [dict(r) for r in rows]
 
 # ------------------ CHAT LOGGING ---------------------
-def log_chat_message(user_id, message, intent):
+def save_chat_log(username, message, intent=None):
+    """
+    Stores chatbot messages for analytics and admin viewing.
+    """
     conn = get_conn()
-    conn.execute(
-        "INSERT INTO chat_logs (user_id, message, intent) VALUES (?,?,?)",
-        (user_id, message, intent),
-    )
-    conn.commit()
-    conn.close()
+    try:
+        user_row = conn.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
+        user_id = user_row["id"] if user_row else None
+        conn.execute(
+            "INSERT INTO chat_logs (user_id, username, message, intent) VALUES (?,?,?,?)",
+            (user_id, username, message, intent),
+        )
+        conn.commit()
+    except Exception as e:
+        print("[WARN] save_chat_log failed:", e)
+    finally:
+        conn.close()
 
-def fetch_chat_logs(limit=100):
+def fetch_chat_logs(limit=40):
+    """
+    Returns the most recent chat logs (default last 40) as a list of dicts:
+    {id, username, message, intent, timestamp}
+    """
     conn = get_conn()
-    rows = conn.execute("""
-        SELECT c.id, u.username, c.message, c.intent, c.timestamp
-        FROM chat_logs c
-        JOIN users u ON u.id = c.user_id
-        ORDER BY datetime(c.timestamp) DESC
-        LIMIT ?
-    """, (limit,)).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    try:
+        rows = conn.execute("""
+            SELECT id, username, message, intent, timestamp
+            FROM chat_logs
+            ORDER BY datetime(timestamp) DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.OperationalError:
+        # table missing or corrupted
+        return []
+    finally:
+        conn.close()
 
 # ------------------ TRAINING DATA ---------------------
 def load_training_csv():
-    rows = []
+    """
+    Returns training CSV rows as list of dicts.
+    """
     if not TRAINING_DATA.exists():
-        return rows
+        return []
     with open(TRAINING_DATA, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
-        for r in reader:
-            rows.append(r)
-    return rows
+        return [r for r in reader]
 
-def save_training_csv(rows):
+def save_training_csv(data):
+    """
+    Saves updated training data to CSV file.
+    'data' can be a list of dicts or plain string CSV.
+    """
     os.makedirs(TRAINING_DATA.parent, exist_ok=True)
+
+    # If a plain string (from textarea), save directly
+    if isinstance(data, str):
+        with open(TRAINING_DATA, "w", encoding="utf-8") as f:
+            f.write(data.strip())
+        return
+
+    # Otherwise, list of dicts
+    if not data:
+        return
     with open(TRAINING_DATA, "w", newline="", encoding="utf-8") as f:
-        if not rows:
-            return
-        writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+        writer = csv.DictWriter(f, fieldnames=data[0].keys())
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(data)
 
 # ------------------ ANALYTICS ---------------------
 def get_intent_stats():
