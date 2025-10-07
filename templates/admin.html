@@ -3,6 +3,7 @@
 
 {% block content %}
 <style>
+  /* === Admin Dashboard Styling === */
   .admin-container {
     max-width: 1000px;
     margin: 2rem auto;
@@ -10,36 +11,39 @@
     border: 1px solid var(--soft);
     border-radius: 18px;
     padding: 1.8rem;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   }
 
   .admin-header {
     font-size: 1.8rem;
     font-weight: 600;
+    /* Gradient text with WebKit fallback */
     background: linear-gradient(90deg, #5de2a5, #5661ff);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    -webkit-background-clip: text; /* For Chrome, Safari */
+    -webkit-text-fill-color: transparent; /* Makes gradient visible */
+    color: transparent;
     margin-bottom: 1.4rem;
   }
 
   h3 {
     font-size: 1.2rem;
     margin-top: 1.8rem;
-    margin-bottom: .8rem;
+    margin-bottom: 0.8rem;
     color: #cfd4ff;
   }
 
   table {
     width: 100%;
     border-collapse: collapse;
-    margin-top: .5rem;
+    margin-top: 0.5rem;
+    font-size: 0.92rem;
   }
 
   th, td {
     border: 1px solid #333a66;
-    padding: .6rem .9rem;
+    padding: 0.6rem 0.9rem;
     text-align: left;
-    font-size: 0.92rem;
   }
 
   th {
@@ -59,10 +63,11 @@
     padding: 0.6rem 1.2rem;
     cursor: pointer;
     font-weight: 600;
+    transition: background 0.2s ease;
   }
 
   button:hover {
-    opacity: 0.9;
+    background: linear-gradient(90deg, #4450dd, #7c4af2);
   }
 
   textarea {
@@ -85,17 +90,27 @@
     border-radius: 10px;
     padding: 1rem;
   }
+
+  .empty-text {
+    color: #9ca3af;
+    font-style: italic;
+  }
 </style>
 
 <div class="admin-container">
   <div class="admin-header">👩‍💼 Admin Dashboard</div>
   <p>Welcome, <strong>{{ current_user.full_name }}</strong> — manage BankBot model and view analytics here.</p>
 
-  <!-- Logs Section -->
+  <!-- === User Chat Logs === -->
   <h3>🗂 User Chat Logs</h3>
   {% if logs %}
   <table>
-    <tr><th>User</th><th>Message</th><th>Intent</th><th>Timestamp</th></tr>
+    <tr>
+      <th>User</th>
+      <th>Message</th>
+      <th>Intent</th>
+      <th>Timestamp</th>
+    </tr>
     {% for log in logs %}
     <tr>
       <td>{{ log.username }}</td>
@@ -106,18 +121,20 @@
     {% endfor %}
   </table>
   {% else %}
-  <p>No logs found.</p>
+  <p class="empty-text">No chat logs found yet.</p>
   {% endif %}
 
-  <!-- Training Data -->
+  <!-- === Training Data Management === -->
   <h3>🧠 Training Data</h3>
   <form method="post" action="{{ url_for('update_training_data') }}">
     <textarea name="training_data" placeholder="intent,text,response">{{ training_data }}</textarea>
-    <button type="submit">💾 Save Changes</button>
-    <button type="button" onclick="location.href='{{ url_for('retrain_model') }}'">🔄 Retrain Model</button>
+    <div style="margin-top: 0.6rem;">
+      <button type="submit">💾 Save Changes</button>
+      <button type="button" onclick="location.href='{{ url_for('retrain_model') }}'">🔄 Retrain Model</button>
+    </div>
   </form>
 
-  <!-- Analytics -->
+  <!-- === Analytics Section === -->
   <h3>📊 Analytics</h3>
   <div class="chart-container">
     <canvas id="intentChart" width="400" height="200"></canvas>
@@ -127,12 +144,13 @@
   </div>
 </div>
 
-<!-- Chart.js CDN -->
+<!-- === Chart.js CDN === -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-  const intentData = {{ intent_stats|tojson }};
-  const topQueries = {{ top_queries|tojson }};
+  const intentData = {{ intent_stats | tojson }};
+  const topQueries = {{ top_queries | tojson }};
 
+  // Intent Distribution Bar Chart
   const ctx1 = document.getElementById('intentChart').getContext('2d');
   new Chart(ctx1, {
     type: 'bar',
@@ -143,9 +161,14 @@
         data: intentData.map(i => i.count),
         backgroundColor: '#5661ff'
       }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } }
     }
   });
 
+  // Top Queries Pie Chart
   const ctx2 = document.getElementById('queryChart').getContext('2d');
   new Chart(ctx2, {
     type: 'pie',
@@ -156,9 +179,8 @@
         data: topQueries.map(q => q.count),
         backgroundColor: ['#5de2a5','#8b5cf6','#5661ff','#f59e0b','#ef4444']
       }]
-    }
+    },
+    options: { responsive: true }
   });
 </script>
 {% endblock %}
-
-
