@@ -1,4 +1,4 @@
-# app.py (full file) — drop-in replacement
+
 from flask import (
     Flask, render_template, request, redirect, url_for,
     session, jsonify, flash
@@ -32,7 +32,7 @@ app.config.update(
 )
 
 # Bank name (change here)
-BANK_NAME = os.environ.get("BANK_NAME", "Aurora Bank")
+BANK_NAME = os.environ.get("BANK_NAME", "veridia Bank")
 
 # ---------------- Bootstrap DB & NLU ----------------
 init_db(seed=True)
