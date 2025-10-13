@@ -33,10 +33,7 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=False,  # set True when behind HTTPS
 )
-
-
 BANK_NAME = os.environ.get("BANK_NAME", "veridia Bank")
-
 
 init_db(seed=True)
 
