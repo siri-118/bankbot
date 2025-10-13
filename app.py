@@ -8,7 +8,7 @@ import os, re, random, tempfile
 from io import BytesIO
 import datetime as dt
 
-# Local modules (make sure db.py contains these functions)
+
 from db import (
     init_db,
     verify_user,
@@ -25,7 +25,7 @@ from db import (
 )
 from nlu_runtime import TinyNLU
 
-# ---------------- App config ----------------
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret")
 app.config.update(
@@ -34,10 +34,10 @@ app.config.update(
     SESSION_COOKIE_SECURE=False,  # set True when behind HTTPS
 )
 
-# Bank name (change here)
+
 BANK_NAME = os.environ.get("BANK_NAME", "veridia Bank")
 
-# ---------------- Bootstrap DB & NLU ----------------
+
 init_db(seed=True)
 
 
@@ -55,13 +55,13 @@ except Exception as e:
     print("[WARN] Could not initialize NLU:", e)
     nlu = None
 
-# ---------------- Context processor ----------------
+
 @app.context_processor
 def inject_user():
     # Makes 'current_user' available inside Jinja templates
     return {"current_user": session.get("user")}
 
-# ---------------- Helpers -------------------------
+
 def fmt_rupees(amount: float) -> str:
     return f"₹ {amount:,.2f}"
 
@@ -109,14 +109,14 @@ def login_required(fn):
         return fn(*args, **kwargs)
     return wrapper
 
-# ---------------- Dialog helpers ------------------
+
 def start_dialog(intent, slots=None):
     session["dialog"] = {"intent": intent, "slots": slots or {}, "fallbacks": 0}
 
 def end_dialog(success=True):
     session.pop("dialog", None)
 
-# ---------------- Routes: Auth & Pages -------------
+
 @app.route("/", methods=["GET"])
 def index():
     return redirect(url_for("role_select"))
@@ -136,7 +136,7 @@ def login_page():
             flash("Invalid credentials", "error")
             return render_template("login.html", chosen_role=chosen_role)
 
-        # set session
+        
         session["user"] = {
             "id": user["id"],
             "username": user["username"],
@@ -144,7 +144,7 @@ def login_page():
             "role": user["role"],
         }
 
-        # map roles to pages (support older 'employee' role mapped to admin)
+
         role = user["role"]
         if role == "manager":
             return redirect(url_for("manager_page"))
@@ -158,7 +158,7 @@ def logout_page():
     session.clear()
     return redirect(url_for("role_select"))
 
-# ---------------- Portal pages --------------------
+
 @app.route("/manager")
 @login_required
 def manager_page():
@@ -167,7 +167,7 @@ def manager_page():
         return redirect(url_for("role_select"))
     return render_template("manager.html")
 
-# Single admin endpoint (function name admin_page) — ensure template name matches your file
+
 @app.route("/admin")
 @login_required
 def admin_page():
@@ -175,14 +175,14 @@ def admin_page():
         flash("Access denied: admin only.", "error")
         return redirect(url_for("role_select"))
 
-    # Use db helpers to fetch logs, training CSV, analytics
+
     logs = []
     training_data = ""
     intent_stats = []
     top_queries = []
 
     try:
-        # return last 40 chats
+
         logs = fetch_chat_logs(limit=40)
     except Exception:
         logs = []
@@ -202,8 +202,8 @@ def admin_page():
     except Exception:
         top_queries = []
 
-    # Render your admin dashboard template (you said you replaced admin.html with admin_dashboard.html)
-    # Change this string to match the exact filename in templates/ (admin_dashboard.html or admin.html)
+
+
     return render_template(
         "admin_dashboard.html",
         logs=logs,
@@ -263,7 +263,7 @@ def support_page():
         return redirect(url_for("role_select"))
     return render_template("support.html")
 
-# ---------------- Admin actions (POST endpoints) -------
+
 @app.route("/update-training-data", methods=["POST"])
 @login_required
 def update_training_data():
@@ -283,7 +283,7 @@ def retrain_model():
     if session.get("user", {}).get("role") not in ("admin", "employee", "manager"):
         flash("Access denied: admin only.", "error")
         return redirect(url_for("role_select"))
-    # Trigger retrain (simple sync call here — for production do background job)
+
     try:
         from nlu_train import train_and_save
         train_and_save()
@@ -295,7 +295,7 @@ def retrain_model():
         flash(f"Retrain failed: {e}", "error")
     return redirect(url_for("admin_page"))
 
-# ---------------- Admin CSV download (Option 2) ----------------
+# ---------------- Admin CSV download---------------
 @app.route("/admin/download-logs")
 @login_required
 def download_logs_csv():
@@ -324,7 +324,7 @@ def chat():
         return jsonify({"reply": "Please type a message.", "intent": "fallback"}), 200
 
     user_id = session["user"]["id"]
-    # log user message
+
     try:
         log_chat_message(user_id, msg, None)
     except Exception:
@@ -333,13 +333,13 @@ def chat():
     text = msg.strip()
     lower = text.lower()
 
-    # 0) Continue dialog if active (special case: only handle specific dialog)
+
     dialog = session.get("dialog")
     if dialog:
         intent = dialog.get("intent")
         slots = dialog.get("slots", {})
 
-        # Balance dialog: expect account number
+
         if intent == "balance_check":
             maybe = re.search(r'(\d{4,})', lower)
             if maybe:
@@ -350,7 +350,7 @@ def chat():
                 end_dialog(success=True)
                 reply_text = f"💰 Balance for account {acct} is {fmt_rupees(total)}."
                 reply_html = reply_text + "\n" + format_entity_html("balance_check")
-                # log bot reply
+
                 try:
                     log_chat_message(user_id, reply_text, "balance_check")
                 except Exception:
@@ -370,7 +370,7 @@ def chat():
                     pass
                 return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "ask_account_number"}), 200
 
-        # Card dialog
+
         if intent == "card_flow":
             if re.search(r"\b(credit|debit|prepaid|pre-paid|pre paid)\b", lower):
                 card_type = re.search(r"\b(credit|debit|prepaid|pre-paid|pre paid)\b", lower).group(1)
@@ -499,7 +499,7 @@ def chat():
             pass
         return jsonify({"reply": reply_text, "reply_html": reply_html, "intent": "loan_flow", "entity": "loan_flow"}), 200
 
-    # 2) NLU fallback
+    #NLU fallback
     if nlu:
         try:
             predicted = nlu.parse(msg)

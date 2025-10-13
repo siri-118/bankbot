@@ -1,4 +1,4 @@
-# nlu_train.py — trains intents and stores replies from CSV
+
 import pickle
 from pathlib import Path
 from typing import Dict, List
@@ -14,7 +14,7 @@ def train_and_save(model_path: Path = MODEL_PATH, csv_path: Path = CSV_PATH):
     if not csv_path.exists():
         raise FileNotFoundError(f"CSV not found: {csv_path}")
 
-    # Read CSV (robust to commas/utf-8-sig)
+
     df = pd.read_csv(csv_path, sep=None, engine="python", encoding="utf-8-sig")
 
     for col in ("text", "intent", "response"):
@@ -49,9 +49,9 @@ def train_and_save(model_path: Path = MODEL_PATH, csv_path: Path = CSV_PATH):
     with open(model_path, "wb") as f:
         pickle.dump({"model": pipe, "responses": replies}, f)
 
-    print("✅ Trained on:", csv_path)
+    print(" Trained on:", csv_path)
     print("   classes:", sorted(set(y)))
-    print("💾 Saved →", model_path)
+    print("Saved →", model_path)
 
 if __name__ == "__main__":
     train_and_save()
