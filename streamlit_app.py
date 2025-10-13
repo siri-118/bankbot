@@ -38,4 +38,10 @@ if user_input:
     except Exception as e:
         bot_msg = f"⚠️ Unexpected error: {str(e)}"
 
-    st
+    
+    # 🔹 Display bot message immediately in chat
+    with st.chat_message("bot"):
+        st.markdown(bot_msg)
+
+    # 🔹 Save bot message to session state (to persist chat history)
+    st.session_state.messages.append({"role": "bot", "content": bot_msg})
