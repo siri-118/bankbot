@@ -203,6 +203,7 @@ def admin_page():
 
     return render_template(
         "admin_dashboard.html",
+        admin_name="Admin",
         logs=logs,
         training_data=training_data,
         intent_stats=intent_stats,

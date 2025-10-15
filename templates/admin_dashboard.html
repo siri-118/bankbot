@@ -89,7 +89,8 @@
   <div class="header">
     <div>
       <h1>👩‍💼 Admin Dashboard — {{ bank_name }}</h1>
-      <div class="sub">Welcome, <strong>{{ current_user.full_name }}</strong> — manage model, view analytics and chat logs.</div>
+      <div class="sub">Welcome, <strong>Admin</strong> — manage model, view analytics and chat logs.</div>
+
     </div>
     <div class="controls">
       <form method="get" action="{{ url_for('retrain_model') }}" style="display:inline;">
